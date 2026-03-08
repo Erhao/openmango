@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState, NumberInputEvent, StepAction};
+use gpui_component::table::TableState;
 use gpui_component::tree::{TreeItem, TreeState};
 use mongodb::bson::Bson;
 
@@ -14,6 +15,7 @@ use crate::perf::log_tabs_duration;
 use crate::state::{AppState, SessionKey};
 use crate::views::documents::dialogs::property_dialog::PropertyActionDialog;
 use crate::views::documents::node_meta::NodeMeta;
+use crate::views::documents::table::document_table_delegate::DocumentTableDelegate;
 use crate::views::documents::tree::document_tree::{build_documents_tree, flatten_tree_order_all};
 use crate::views::documents::types::InlineEditor;
 
@@ -43,6 +45,8 @@ pub struct DocumentViewModel {
     editing_doc_key: Option<DocumentKey>,
     editing_path: Vec<PathSegment>,
     editing_original: Option<Bson>,
+    table_state: Option<Entity<TableState<DocumentTableDelegate>>>,
+    table_generation: Option<u64>,
 }
 
 impl DocumentViewModel {
@@ -62,6 +66,8 @@ impl DocumentViewModel {
             editing_doc_key: None,
             editing_path: Vec::new(),
             editing_original: None,
+            table_state: None,
+            table_generation: None,
         }
     }
 
@@ -473,5 +479,144 @@ impl DocumentViewModel {
             self.sync_dirty_state(state, cx);
         }
         updated
+    }
+
+    pub fn ensure_table_state(
+        &mut self,
+        state: &Entity<AppState>,
+        view: &Entity<CollectionView>,
+        window: &mut Window,
+        cx: &mut Context<CollectionView>,
+    ) -> Entity<TableState<DocumentTableDelegate>> {
+        if let Some(table_state) = &self.table_state {
+            return table_state.clone();
+        }
+        let delegate =
+            DocumentTableDelegate::new(state.clone(), view.clone(), self.current_session.clone());
+        let table_state = cx.new(|cx| {
+            TableState::new(delegate, window, cx).col_selectable(false).col_movable(true)
+        });
+
+        // Subscribe to table events for row selection and double-click.
+        let state_clone = state.clone();
+        let view_clone = view.clone();
+        cx.subscribe_in(&table_state, window, move |cv, ts, event, window, cx| {
+            use gpui_component::table::TableEvent;
+            match event {
+                TableEvent::SelectRow(row_ix) => {
+                    let row_ix = *row_ix;
+                    let session_key = cv.view_model.current_session();
+                    let doc_key = ts.read(cx).delegate().document_key(row_ix);
+                    if let (Some(sk), Some(dk)) = (session_key, doc_key) {
+                        cv.state.update(cx, |state, cx| {
+                            state.select_single_doc(&sk, dk, String::new());
+                            cx.notify();
+                        });
+                    }
+                }
+                TableEvent::DoubleClickedRow(row_ix) => {
+                    let row_ix = *row_ix;
+                    let session_key = cv.view_model.current_session();
+                    let doc_key = ts.read(cx).delegate().document_key(row_ix);
+                    if let (Some(sk), Some(dk)) = (session_key, doc_key) {
+                        CollectionView::open_document_json_editor(
+                            view_clone.clone(),
+                            state_clone.clone(),
+                            sk,
+                            dk,
+                            window,
+                            cx,
+                        );
+                    }
+                }
+                TableEvent::ColumnWidthsChanged(widths) => {
+                    let col_widths: HashMap<String, f32> = {
+                        let delegate = ts.read(cx).delegate();
+                        widths
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, w)| delegate.column_key(i).map(|k| (k, f32::from(*w))))
+                            .collect()
+                    };
+                    ts.update(cx, |ts, _cx| {
+                        ts.delegate_mut().update_saved_widths(col_widths.clone());
+                    });
+                    if let Some(sk) = cv.view_model.current_session() {
+                        cv.state.update(cx, |state, cx| {
+                            state.set_table_column_widths(&sk, col_widths);
+                            cx.notify();
+                        });
+                    }
+                }
+                TableEvent::MoveColumn(from_ix, to_ix) => {
+                    let from_ix = *from_ix;
+                    let to_ix = *to_ix;
+                    let order = {
+                        ts.update(cx, |ts, _cx| {
+                            ts.delegate_mut().apply_column_move(from_ix, to_ix);
+                            ts.delegate_mut().column_order()
+                        })
+                    };
+                    if let Some(sk) = cv.view_model.current_session() {
+                        cv.state.update(cx, |state, cx| {
+                            state.set_table_column_order(&sk, order);
+                            cx.notify();
+                        });
+                    }
+                    cv.view_model.invalidate_table();
+                    cx.notify();
+                }
+                _ => {}
+            }
+        })
+        .detach();
+
+        self.table_state = Some(table_state.clone());
+        table_state
+    }
+
+    pub fn rebuild_table(
+        &mut self,
+        state: &Entity<AppState>,
+        view: &Entity<CollectionView>,
+        window: &mut Window,
+        cx: &mut Context<CollectionView>,
+    ) {
+        let Some(session_key) = self.current_session.clone() else {
+            return;
+        };
+        let (generation, documents, drafts, is_loading, saved_widths, saved_order, pinned) = {
+            let state_ref = state.read(cx);
+            let Some(session) = state_ref.session(&session_key) else {
+                return;
+            };
+            let generation = session.generation;
+            if self.table_generation == Some(generation) && self.table_state.is_some() {
+                return;
+            }
+            (
+                generation,
+                session.data.items.clone(),
+                session.view.drafts.clone(),
+                session.data.is_loading,
+                session.view.table_column_widths.clone(),
+                session.view.table_column_order.clone(),
+                session.view.table_pinned_columns.clone(),
+            )
+        };
+
+        let table_state = self.ensure_table_state(state, view, window, cx);
+        table_state.update(cx, |ts, cx| {
+            ts.delegate_mut().set_saved_widths(saved_widths);
+            ts.delegate_mut().set_column_order(saved_order);
+            ts.delegate_mut().set_pinned_columns(pinned);
+            ts.delegate_mut().refresh_data(documents, drafts, Some(session_key), is_loading);
+            ts.refresh(cx);
+        });
+        self.table_generation = Some(generation);
+    }
+
+    pub fn invalidate_table(&mut self) {
+        self.table_generation = None;
     }
 }

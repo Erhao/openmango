@@ -338,6 +338,9 @@ pub struct ToolActivity {
     /// Collection name extracted from tool args (persists across restarts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
+    /// Full args JSON for tools that need it (e.g. aggregate pipelines).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args_full: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -451,6 +454,13 @@ impl AiChatState {
         self.last_error = None;
     }
 
+    pub fn clear_chat(&mut self) {
+        self.entries.clear();
+        self.current_turn_id = None;
+        self.last_error = None;
+        self.mentioned_collections.clear();
+    }
+
     pub fn find_turn_mut(&mut self, turn_id: Uuid) -> Option<&mut AiTurn> {
         self.entries.iter_mut().find_map(|entry| match entry {
             AiChatEntry::Turn(turn) if turn.id == turn_id => Some(turn),
@@ -499,6 +509,7 @@ impl AiChatState {
         let collection = serde_json::from_str::<serde_json::Value>(&args_full)
             .ok()
             .and_then(|v| v.get("collection")?.as_str().map(String::from));
+        let args_full_stored = if name == "aggregate" { Some(args_full.clone()) } else { None };
         self.entries.push(AiChatEntry::ToolActivity(ToolActivity {
             id,
             tool_name: name,
@@ -507,6 +518,7 @@ impl AiChatState {
             result_preview: None,
             result_block: None,
             collection,
+            args_full: args_full_stored,
         }));
         self.trim_entries();
         id

@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use gpui::{Bounds, WindowBounds, point, px, size};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -71,6 +73,12 @@ pub struct WorkspaceTab {
     /// Legacy: kept for backwards-compatible deserialization of old workspaces.
     #[serde(default)]
     pub ai_messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub table_column_widths: HashMap<String, f32>,
+    #[serde(default)]
+    pub table_column_order: Vec<String>,
+    #[serde(default)]
+    pub table_pinned_columns: HashSet<String>,
 }
 
 impl WorkspaceTab {
@@ -207,6 +215,9 @@ mod tests {
             ai_draft_input: String::new(),
             ai_entries: Vec::new(),
             ai_messages: Vec::new(),
+            table_column_widths: HashMap::new(),
+            table_column_order: Vec::new(),
+            table_pinned_columns: HashSet::new(),
         };
 
         let encoded = serde_json::to_string(&tab).expect("workspace tab should serialize");

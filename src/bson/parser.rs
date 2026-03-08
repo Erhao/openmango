@@ -692,6 +692,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_date_in_aggregate_match_stage() {
+        // This is the exact pattern the LLM generates for date range queries
+        let input = r#"{"$match": {"startDate": {"$gte": {"$date": "2025-05-01T00:00:00Z"}, "$lt": {"$date": "2025-06-01T00:00:00Z"}}}}"#;
+        let doc = parse_document_from_json(input).expect("parse");
+        let match_doc = doc.get_document("$match").expect("$match");
+        let start_date = match_doc.get_document("startDate").expect("startDate");
+        let gte = start_date.get("$gte").expect("$gte");
+        let lt = start_date.get("$lt").expect("$lt");
+        assert!(matches!(gte, Bson::DateTime(_)), "$gte should be DateTime, got {:?}", gte);
+        assert!(matches!(lt, Bson::DateTime(_)), "$lt should be DateTime, got {:?}", lt);
+    }
+
+    #[test]
     fn does_not_replace_inside_strings() {
         let doc = parse_document_from_json("{ note: \"ObjectId(\\\"abc\\\")\" }").expect("parse");
         let note = doc.get_str("note").expect("note");

@@ -18,7 +18,7 @@ use crate::views::documents::node_meta::NodeMeta;
 
 use super::super::CollectionView;
 
-pub(super) fn build_document_menu(
+pub(in crate::views::documents) fn build_document_menu(
     mut menu: PopupMenu,
     state: Entity<AppState>,
     view: Entity<CollectionView>,

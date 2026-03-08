@@ -8,7 +8,7 @@ use gpui_component::{Icon, IconName, Sizable as _};
 
 use crate::bson::DocumentKey;
 use crate::components::Button;
-use crate::state::{AppState, SessionDocument, SessionKey};
+use crate::state::{AppState, DocumentViewMode, SessionDocument, SessionKey};
 use crate::theme::spacing;
 
 use super::super::CollectionView;
@@ -30,9 +30,32 @@ impl CollectionView {
         selected_docs: std::collections::HashSet<DocumentKey>,
         state_for_prev: Entity<AppState>,
         state_for_next: Entity<AppState>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Check view mode — delegate to table view if in Table mode.
+        let view_mode = session_key
+            .as_ref()
+            .map(|sk| self.state.read(cx).session_view_mode(sk))
+            .unwrap_or_default();
+        if view_mode == DocumentViewMode::Table {
+            return self.render_table_subview(
+                documents,
+                total,
+                display_page,
+                total_pages,
+                range_start,
+                range_end,
+                is_loading,
+                session_key,
+                selected_docs,
+                state_for_prev,
+                state_for_next,
+                window,
+                cx,
+            );
+        }
+
         let show_search = self.search_visible || self.current_search_query(cx).is_some();
         let match_total = self.search_matches.len();
         let match_position = self.search_index.map(|ix| ix + 1).unwrap_or(0);

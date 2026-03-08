@@ -2,6 +2,8 @@
 //!
 //! No MongoDB container needed — pure serialization/deserialization tests.
 
+use std::collections::{HashMap, HashSet};
+
 use openmango::state::CollectionSubview;
 use openmango::state::settings::{
     AppSettings, AppTheme, DEFAULT_FILENAME_TEMPLATE, IslandsCornerSoftness, IslandsTabStyle,
@@ -121,6 +123,9 @@ fn test_workspace_tab_forge_roundtrip() {
         ai_draft_input: String::new(),
         ai_entries: Vec::new(),
         ai_messages: Vec::new(),
+        table_column_widths: HashMap::new(),
+        table_column_order: Vec::new(),
+        table_pinned_columns: HashSet::new(),
     };
 
     let json = serde_json::to_string(&tab).expect("should serialize");

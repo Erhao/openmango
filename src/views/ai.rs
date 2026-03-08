@@ -296,6 +296,7 @@ impl AiView {
                     .soft_wrap(true)
                     .line_number(false)
                     .auto_indent(false)
+                    .submit_on_enter(true)
                     .clean_on_escape()
                     .placeholder("Ask AI Assistant...")
             });
@@ -359,7 +360,7 @@ impl AiView {
                                 s.ai_chat.draft_input = raw;
                             });
                         }
-                        InputEvent::PressEnter { secondary: true } => {
+                        InputEvent::PressEnter { secondary: false } => {
                             let can_submit = {
                                 let s = state.read(cx);
                                 s.settings.ai.enabled
@@ -453,6 +454,12 @@ impl AiView {
             history.pop();
         }
         let system_prompt = build_ai_context(self.state.read(cx), &mentioned);
+        log::debug!(
+            "[ai-chat] system_prompt len={} history_msgs={}",
+            system_prompt.len(),
+            history.len()
+        );
+        log::debug!("[ai-chat] system_prompt:\n{system_prompt}");
         trim_history_for_context(&mut history, system_prompt.len(), None);
 
         let tool_ctx = {
@@ -645,6 +652,7 @@ impl Render for AiView {
             let close_state = state.clone();
             let header_buttons = div().flex().items_center().gap(px(6.0));
 
+            let has_entries = !ai_chat.entries.is_empty();
             let header_buttons = if is_loading {
                 let view = cx.entity();
                 header_buttons.child(
@@ -656,6 +664,25 @@ impl Render for AiView {
                         .on_click(move |_, _, cx| {
                             view.update(cx, |this, cx| {
                                 this.stop_generation(cx);
+                            });
+                        }),
+                )
+            } else {
+                header_buttons
+            };
+
+            let header_buttons = if has_entries && !is_loading {
+                let clear_state = state.clone();
+                header_buttons.child(
+                    Button::new("clear-chat")
+                        .ghost()
+                        .compact()
+                        .icon(Icon::new(IconName::Delete).xsmall())
+                        .tooltip("Clear chat")
+                        .on_click(move |_, _, cx| {
+                            clear_state.update(cx, |state, cx| {
+                                state.ai_chat.clear_chat();
+                                cx.notify();
                             });
                         }),
                 )
@@ -1122,7 +1149,7 @@ impl Render for AiView {
                 .primary()
                 .compact()
                 .icon(Icon::new(IconName::ArrowUp).xsmall())
-                .tooltip("Send (Cmd+Enter)")
+                .tooltip("Send (Enter)")
                 .disabled(!can_submit)
                 .on_click(move |_, window, cx| {
                     let prompt = input_state_for_submit.read(cx).value().to_string();
@@ -1971,13 +1998,16 @@ fn render_tool_group(
                 window,
                 cx,
             ));
-            if matches!(block, ContentBlock::DataTable { .. }) {
+            if matches!(block, ContentBlock::DataTable { .. }) && t.tool_name == "find_documents" {
                 let col_name = t.collection.clone().or_else(|| {
                     serde_json::from_str::<serde_json::Value>(&t.args_preview)
                         .ok()
                         .and_then(|v| v.get("collection")?.as_str().map(String::from))
                 });
-                if let Some(col) = col_name {
+                let current_col = state.read(cx).selected_collection_name();
+                if let Some(col) = col_name
+                    && current_col.as_deref() != Some(col.as_str())
+                {
                     let st = state.clone();
                     item = item.child(
                         div().flex().child(
@@ -2014,6 +2044,65 @@ fn render_tool_group(
                         ),
                     );
                 }
+            }
+            if t.tool_name == "aggregate"
+                && let Some(args_json) = &t.args_full
+            {
+                let mut row = div().flex().gap(spacing::xs());
+                if let Some((col, stages)) = parse_pipeline_from_args(args_json) {
+                    let st = state.clone();
+                    let col_for_agg = col.clone();
+                    let stages_for_agg = stages.clone();
+                    row = row.child(
+                        Button::new(ElementId::Name(format!("open-agg-{group_key}-{i}").into()))
+                            .ghost()
+                            .compact()
+                            .icon(Icon::new(IconName::SquareTerminal).xsmall())
+                            .label("Open in Aggregation")
+                            .on_click(move |_, _, cx| {
+                                let col = col_for_agg.clone();
+                                let stages = stages_for_agg.clone();
+                                st.update(cx, |state, cx| {
+                                    if let Some(db) = state.selected_database_name() {
+                                        if !col.is_empty() {
+                                            state.select_collection(db, col, cx);
+                                        }
+                                        if let Some(key) = state.current_session_key() {
+                                            state.set_collection_subview(
+                                                &key,
+                                                crate::state::CollectionSubview::Aggregation,
+                                            );
+                                            state.replace_pipeline_stages(&key, stages);
+                                        }
+                                        cx.notify();
+                                    }
+                                });
+                            }),
+                    );
+                    let st2 = state.clone();
+                    if let Some(content) = build_forge_aggregate_command(args_json) {
+                        row = row.child(
+                            Button::new(ElementId::Name(
+                                format!("open-forge-{group_key}-{i}").into(),
+                            ))
+                            .ghost()
+                            .compact()
+                            .icon(Icon::new(IconName::SquareTerminal).xsmall())
+                            .label("Open in Forge")
+                            .on_click(move |_, _, cx| {
+                                let content = content.clone();
+                                st2.update(cx, |state, cx| {
+                                    if let Some(conn_id) = state.selected_connection_id()
+                                        && let Some(db) = state.selected_database_name()
+                                    {
+                                        state.open_forge_tab_with_content(conn_id, db, content, cx);
+                                    }
+                                });
+                            }),
+                        );
+                    }
+                }
+                item = item.child(row);
             }
         }
         tool_elements.push(item.into_any_element());
@@ -2366,6 +2455,48 @@ fn display_tool_name(name: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn parse_pipeline_from_args(
+    args_json: &str,
+) -> Option<(String, Vec<crate::state::app_state::PipelineStage>)> {
+    let args: serde_json::Value = serde_json::from_str(args_json).ok()?;
+    let pipeline_str = args.get("pipeline")?.as_str()?;
+    let collection = args.get("collection").and_then(|v| v.as_str()).map(String::from);
+    let pipeline: Vec<serde_json::Value> = serde_json::from_str(pipeline_str).ok()?;
+
+    let stages: Vec<crate::state::app_state::PipelineStage> = pipeline
+        .iter()
+        .filter_map(|stage| {
+            let obj = stage.as_object()?;
+            let (op, body_val) = obj.iter().next()?;
+            let body = serde_json::to_string_pretty(body_val).ok()?;
+            Some(crate::state::app_state::PipelineStage {
+                operator: op.clone(),
+                body,
+                enabled: true,
+            })
+        })
+        .collect();
+
+    if stages.is_empty() {
+        return None;
+    }
+    Some((collection.unwrap_or_default(), stages))
+}
+
+fn build_forge_aggregate_command(args_json: &str) -> Option<String> {
+    let args: serde_json::Value = serde_json::from_str(args_json).ok()?;
+    let collection = args.get("collection")?.as_str()?;
+    let pipeline_str = args.get("pipeline")?.as_str()?;
+    let pipeline: Vec<serde_json::Value> = serde_json::from_str(pipeline_str).ok()?;
+    if pipeline.is_empty() {
+        return None;
+    }
+    let pipeline_array = serde_json::Value::Array(pipeline);
+    let formatted = crate::bson::format_relaxed_json_value(&pipeline_array);
+    let escaped = collection.replace('"', "\\\"");
+    Some(format!("db.getCollection(\"{escaped}\").aggregate({formatted})"))
 }
 
 #[cfg(test)]

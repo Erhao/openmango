@@ -370,6 +370,7 @@ impl CollectionView {
                             this.view_model.rebuild_tree(&state, cx);
                         }
                     }
+                    this.view_model.invalidate_table();
                     if session_changed {
                         this.update_search_results(cx);
                     }
@@ -395,6 +396,7 @@ impl CollectionView {
                 }
                 this.view_model.clear_inline_edit();
                 this.view_model.rebuild_tree(&state, cx);
+                this.view_model.invalidate_table();
                 this.view_model.sync_dirty_state(&state, cx);
                 this.update_search_results(cx);
                 // Force re-sync of filter/sort/projection inputs from session data.
@@ -410,6 +412,7 @@ impl CollectionView {
                     this.view_model.clear_inline_edit();
                 }
                 this.view_model.rebuild_tree(&state, cx);
+                this.view_model.invalidate_table();
                 this.view_model.sync_dirty_state(&state, cx);
                 this.update_search_results(cx);
                 cx.notify();
@@ -422,6 +425,7 @@ impl CollectionView {
                     this.view_model.clear_inline_edit();
                 }
                 this.view_model.rebuild_tree(&state, cx);
+                this.view_model.invalidate_table();
                 this.view_model.sync_dirty_state(&state, cx);
                 this.update_search_results(cx);
                 cx.notify();

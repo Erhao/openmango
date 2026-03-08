@@ -7,10 +7,14 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::{Disableable as _, Icon, IconName, Sizable as _, Size};
 use mongodb::bson::Document;
 
+use std::collections::HashMap;
+
 use crate::bson::DocumentKey;
 use crate::components::{Button, open_confirm_dialog};
 use crate::keyboard::RunAggregation;
-use crate::state::{AppCommands, AppState, SessionKey, TransferMode, TransferScope};
+use crate::state::{
+    AppCommands, AppState, DocumentViewMode, SessionKey, TransferMode, TransferScope,
+};
 use crate::theme::{borders, spacing};
 use crate::views::documents::CollectionView;
 use crate::views::documents::dialogs::bulk_update::BulkUpdateDialog;
@@ -442,10 +446,103 @@ fn render_documents_actions_clean(
         ai_panel_open,
     );
 
-    div()
-        .flex()
-        .items_center()
-        .gap(px(2.0))
+    let view_mode =
+        session_key.as_ref().map(|sk| state.read(cx).session_view_mode(sk)).unwrap_or_default();
+    let is_tree = view_mode == DocumentViewMode::Tree;
+    let is_table = view_mode == DocumentViewMode::Table;
+    let active_bg = cx.theme().secondary.opacity(0.55);
+
+    let tree_btn = {
+        let mut btn = clean_toolbar_icon_button(
+            Button::new("view-tree").compact().on_click({
+                let state = state.clone();
+                let session_key = session_key.clone();
+                let view = view.clone();
+                move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
+                    let Some(sk) = session_key.clone() else {
+                        return;
+                    };
+                    state.update(cx, |state, cx| {
+                        state.set_view_mode(&sk, DocumentViewMode::Tree);
+                        cx.notify();
+                    });
+                    view.update(cx, |this, cx| {
+                        this.view_model.invalidate_table();
+                        cx.notify();
+                    });
+                }
+            }),
+            IconName::Menu,
+            "Tree view",
+        );
+        if is_tree {
+            btn = btn.active_style(active_bg);
+        }
+        btn
+    };
+
+    let table_btn = {
+        let mut btn = clean_toolbar_icon_button(
+            Button::new("view-table").compact().on_click({
+                let state = state.clone();
+                let session_key = session_key.clone();
+                let view = view.clone();
+                move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
+                    let Some(sk) = session_key.clone() else {
+                        return;
+                    };
+                    state.update(cx, |state, cx| {
+                        state.set_view_mode(&sk, DocumentViewMode::Table);
+                        cx.notify();
+                    });
+                    view.update(cx, |_this, cx| {
+                        cx.notify();
+                    });
+                }
+            }),
+            IconName::LayoutDashboard,
+            "Table view",
+        );
+        if is_table {
+            btn = btn.active_style(active_bg);
+        }
+        btn
+    };
+
+    let reset_columns_btn = if is_table {
+        Some(clean_toolbar_icon_button(
+            Button::new("reset-columns").compact().on_click({
+                let state = state.clone();
+                let session_key = session_key.clone();
+                let view = view.clone();
+                move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
+                    let Some(sk) = session_key.clone() else {
+                        return;
+                    };
+                    state.update(cx, |state, cx| {
+                        state.set_table_column_widths(&sk, HashMap::new());
+                        state.set_table_column_order(&sk, Vec::new());
+                        state.set_table_pinned_columns(&sk, std::collections::HashSet::new());
+                        cx.notify();
+                    });
+                    view.update(cx, |this, cx| {
+                        this.view_model.invalidate_table();
+                        cx.notify();
+                    });
+                }
+            }),
+            IconName::Undo2,
+            "Reset column widths",
+        ))
+    } else {
+        None
+    };
+
+    let mut row = div().flex().items_center().gap(px(2.0)).child(tree_btn).child(table_btn);
+    if let Some(btn) = reset_columns_btn {
+        row = row.child(btn);
+    }
+    row.child(toolbar_separator(cx))
         .child(insert_button)
         .child(edit_button)
         .child(discard_button)

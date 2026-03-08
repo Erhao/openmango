@@ -5,8 +5,8 @@ use rig::tool::Tool;
 use serde::Deserialize;
 
 use super::{
-    MAX_FIND_LIMIT, MAX_OUTPUT_BYTES, MongoContext, ToolError, doc_to_json, resolve_collection,
-    truncate_output,
+    MAX_FIND_LIMIT, MAX_OUTPUT_BYTES, MongoContext, ToolError, doc_to_json, parse_json_to_doc,
+    resolve_collection, truncate_output,
 };
 
 pub struct AggregateTool(MongoContext);
@@ -63,17 +63,14 @@ impl Tool for AggregateTool {
             }
         };
 
+        // Re-serialize each stage and parse through parse_json_to_doc which handles
+        // extended JSON ($oid, $date) and shell syntax (ObjectId, ISODate).
         let mut pipeline: Vec<bson::Document> = stages
             .into_iter()
             .map(|stage| {
-                let bson_val =
-                    bson::to_bson(&stage).map_err(|e| ToolError::InvalidInput(e.to_string()))?;
-                match bson_val {
-                    bson::Bson::Document(doc) => Ok(doc),
-                    _ => Err(ToolError::InvalidInput(
-                        "Each pipeline stage must be an object".to_string(),
-                    )),
-                }
+                let stage_str = serde_json::to_string(&stage)
+                    .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+                parse_json_to_doc(&stage_str)
             })
             .collect::<Result<Vec<_>, _>>()?;
 

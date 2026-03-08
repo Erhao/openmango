@@ -16,7 +16,17 @@ const BASE_PROMPT: &str = "\
 You are an AI assistant for OpenMango, a MongoDB GUI.
 Help with MongoDB queries, schema design, aggregation pipelines, and database operations.
 When writing queries, use MongoDB shell syntax.
-Format your responses using Markdown.";
+Format your responses using Markdown.
+
+CRITICAL RULES:
+1. Once a tool returns the answer, STOP and respond immediately. Do NOT make extra calls to enrich, \
+   verify, or re-check. If a query returns 0 results, that IS the answer — report it, do not retry \
+   with broader or different filters.
+2. When the user says a month without a year, use the most recent occurrence based on the current date \
+   (e.g., if today is March 2026, \"May\" means May 2025).
+3. Do NOT resolve ObjectId references to human-readable names unless explicitly asked.
+4. Do NOT search for additional related data beyond what was asked.
+5. Aim for 3-5 tool calls total. Discovery (1-2 calls) + query (1 call) + respond.";
 
 // ---------------------------------------------------------------------------
 // BudgetWriter
@@ -72,6 +82,11 @@ pub fn build_ai_context(state: &AppState, mentioned_collections: &[String]) -> S
     // ── 1. Base prompt + identity ──────────────────────────────────────────
     w.raw(BASE_PROMPT);
 
+    let now = chrono::Local::now();
+    let date_info =
+        format!("Current date: {} ({})", now.format("%Y-%m-%d %H:%M"), now.format("%Z"),);
+    w.section("## Date & Time", &date_info);
+
     let conn_id = match state.selected_connection_id() {
         Some(id) => id,
         None => return w.finish(),
@@ -84,7 +99,7 @@ pub fn build_ai_context(state: &AppState, mentioned_collections: &[String]) -> S
     // Tools section — when connected, the AI has MongoDB tools available.
     w.section(
         "## Tool Usage Guide",
-        "You have 13 MongoDB tools. Choose the minimal set needed — prefer one powerful call \
+        "You have 14 MongoDB tools. Choose the minimal set needed — prefer one powerful call \
          over many small ones.\n\n\
          ### Querying\n\
          - **aggregate**: Your most powerful tool. Use for any multi-step operation: filtering + \
@@ -98,8 +113,12 @@ pub fn build_ai_context(state: &AppState, mentioned_collections: &[String]) -> S
          ### Introspection\n\
          - **collection_stats**: Get document count, data size, storage size, index count. Use for \
          \"how big/large is this collection?\" questions.\n\
-         - **collection_schema**: Sample 100 docs and analyze field types, presence %, cardinality. \
-         Use when the user asks about structure/fields.\n\
+         - **collection_schema**: Sample 100 docs and analyze field types, presence %, cardinality, \
+         and sample values. Use when the user asks about structure/fields, or when you need to \
+         understand what fields exist and what ObjectId references point to.\n\
+         - **sample_field_values**: Get distinct values for a field. Use to discover statuses, \
+         categories, types, or any enumeration before querying. Essential when you need to know \
+         exact values (e.g., \"APPROVED\" vs \"approved\").\n\
          - **list_indexes**: List all indexes with key definitions. Use for performance analysis.\n\
          - **explain_query**: Explain a find query's execution plan. Use to diagnose slow queries.\n\
          - **list_collections**: List all collections in the database.\n\n\
@@ -131,6 +150,27 @@ pub fn build_ai_context(state: &AppState, mentioned_collections: &[String]) -> S
          - If you need schema or structure for a collection not shown in the context below, \
          call `collection_schema` with the `collection` parameter to fetch it.\n\
          - When the user asks about data, always use tools — never guess or fabricate data.\n\n\
+         ### Discovery Strategy\n\
+         When the user asks about data and you're unsure about collection names, field names, \
+         or values:\n\
+         1. Check the context below first — schemas, sample docs, and collection list may \
+         already be included.\n\
+         2. If the relevant collection isn't obvious, call `list_collections` to see all \
+         available collections.\n\
+         3. If you're unsure about fields, call `collection_schema` on the target collection — \
+         it returns field names, types, and sample values for each field.\n\
+         4. If you need exact enum values for a field (statuses, types, categories), call \
+         `sample_field_values`.\n\
+         5. Only then construct your query with confirmed field names and values.\n\n\
+         ### Resolving References\n\
+         MongoDB collections often use ObjectId references between collections. When a field \
+         contains ObjectId values that reference another collection (e.g., `leaveType: ObjectId(...)` \
+         referencing a `taxonomies` or `categories` collection):\n\
+         1. First query the referenced collection to find the ObjectId matching the user's intent. \
+         Example: `find_documents` on `taxonomies` with a filter like \
+         `{\"name\": {\"$regex\": \"vacation\", \"$options\": \"i\"}}`.\n\
+         2. Then use the discovered ObjectId in your main query filter.\n\
+         3. Alternatively, use `$lookup` in an aggregation pipeline to join collections.\n\n\
          ### Auto-Rendered Tool Results\n\
          Tool results from find_documents, aggregate, list_indexes, collection_stats, \
          count_documents, and all write tools are automatically rendered as native tables \
@@ -493,13 +533,27 @@ pub fn build_ai_context(state: &AppState, mentioned_collections: &[String]) -> S
 // ---------------------------------------------------------------------------
 
 /// Produce a one-line compact schema representation for a sibling collection.
+/// Low-cardinality fields include their distinct values for discovery.
 fn compact_schema_line(collection: &str, schema: &crate::state::SchemaAnalysis) -> String {
+    use crate::state::CardinalityBand;
+
     let field_summary: Vec<String> = schema
         .fields
         .iter()
         .map(|f| {
             let primary_type = f.types.first().map(|t| t.bson_type.as_str()).unwrap_or("?");
-            format!("{}: {primary_type}", f.name)
+            let samples = schema
+                .sample_values
+                .get(&f.path)
+                .filter(|_| {
+                    schema.cardinality.get(&f.path).is_some_and(|c| c.band == CardinalityBand::Low)
+                })
+                .map(|vals| {
+                    let display: Vec<&str> = vals.iter().take(5).map(|(v, _)| v.as_str()).collect();
+                    format!(" [{}]", display.join(", "))
+                })
+                .unwrap_or_default();
+            format!("{}: {primary_type}{samples}", f.name)
         })
         .collect();
     format!("### {} ({} fields): {}", collection, schema.total_fields, field_summary.join(", "))

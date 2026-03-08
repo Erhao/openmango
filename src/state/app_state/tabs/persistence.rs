@@ -1,5 +1,7 @@
 use crate::bson::parse_document_from_json;
 use crate::state::app_state::StageDocCounts;
+use std::collections::{HashMap, HashSet};
+
 use crate::state::{
     CollectionSubview, TransferTabKey, TransferTabState, WorkspaceTab, WorkspaceTabKind,
 };
@@ -146,8 +148,8 @@ impl AppState {
 
         // Restore workspace-level AI state (new format).
         // Only apply if the old tab-based migration didn't already set panel_open.
-        if !self.ai_chat.panel_open && self.workspace.ai_panel_open {
-            self.ai_chat.panel_open = true;
+        if !self.ai_chat.panel_open {
+            self.ai_chat.panel_open = self.workspace.ai_panel_open;
             self.ai_chat.draft_input = self.workspace.ai_draft_input.replace(['\n', '\r'], " ");
             self.ai_chat.entries = self.workspace.ai_entries.clone();
             self.ai_chat.is_loading = false;
@@ -206,6 +208,9 @@ impl AppState {
                 session.data.projection_raw = raw;
                 session.data.projection = doc;
             });
+            session.view.table_column_widths = tab.table_column_widths.clone();
+            session.view.table_column_order = tab.table_column_order.clone();
+            session.view.table_pinned_columns = tab.table_pinned_columns.clone();
             session.data.aggregation.stages = tab.aggregation_pipeline.clone();
             session.data.aggregation.stage_doc_counts =
                 vec![StageDocCounts::default(); session.data.aggregation.stages.len()];
@@ -235,6 +240,9 @@ impl AppState {
                     aggregation_pipeline,
                     subview,
                     stats_open,
+                    table_column_widths,
+                    table_column_order,
+                    table_pinned_columns,
                 ) = self
                     .session(key)
                     .map(|session| {
@@ -245,6 +253,9 @@ impl AppState {
                             session.data.aggregation.stages.clone(),
                             session.view.subview,
                             matches!(session.view.subview, CollectionSubview::Stats),
+                            session.view.table_column_widths.clone(),
+                            session.view.table_column_order.clone(),
+                            session.view.table_pinned_columns.clone(),
                         )
                     })
                     .unwrap_or_else(|| {
@@ -255,6 +266,9 @@ impl AppState {
                             Vec::new(),
                             CollectionSubview::Documents,
                             false,
+                            HashMap::new(),
+                            Vec::new(),
+                            HashSet::new(),
                         )
                     });
                 WorkspaceTab {
@@ -273,6 +287,9 @@ impl AppState {
                     ai_draft_input: String::new(),
                     ai_entries: Vec::new(),
                     ai_messages: Vec::new(),
+                    table_column_widths,
+                    table_column_order,
+                    table_pinned_columns,
                 }
             }
             TabKey::Database(key) => WorkspaceTab {
@@ -291,6 +308,9 @@ impl AppState {
                 ai_draft_input: String::new(),
                 ai_entries: Vec::new(),
                 ai_messages: Vec::new(),
+                table_column_widths: HashMap::new(),
+                table_column_order: Vec::new(),
+                table_pinned_columns: HashSet::new(),
             },
             TabKey::Transfer(key) => {
                 let transfer = self.transfer_tabs.get(&key.id).cloned().unwrap_or_default();
@@ -310,6 +330,9 @@ impl AppState {
                     ai_draft_input: String::new(),
                     ai_entries: Vec::new(),
                     ai_messages: Vec::new(),
+                    table_column_widths: HashMap::new(),
+                    table_column_order: Vec::new(),
+                    table_pinned_columns: HashSet::new(),
                 }
             }
             TabKey::Forge(key) => {
@@ -334,6 +357,9 @@ impl AppState {
                     ai_draft_input: String::new(),
                     ai_entries: Vec::new(),
                     ai_messages: Vec::new(),
+                    table_column_widths: HashMap::new(),
+                    table_column_order: Vec::new(),
+                    table_pinned_columns: HashSet::new(),
                 }
             }
             TabKey::Settings | TabKey::Changelog => {
@@ -354,6 +380,9 @@ impl AppState {
                     ai_draft_input: String::new(),
                     ai_entries: Vec::new(),
                     ai_messages: Vec::new(),
+                    table_column_widths: HashMap::new(),
+                    table_column_order: Vec::new(),
+                    table_pinned_columns: HashSet::new(),
                 }
             }
         }
@@ -510,6 +539,9 @@ mod tests {
             ai_draft_input: "old draft".to_string(),
             ai_entries: Vec::new(),
             ai_messages: Vec::new(),
+            table_column_widths: HashMap::new(),
+            table_column_order: Vec::new(),
+            table_pinned_columns: HashSet::new(),
         });
         state.workspace.active_tab = Some(0);
         let _active = state.restore_tabs_from_workspace(conn_id, &["db".to_string()]);

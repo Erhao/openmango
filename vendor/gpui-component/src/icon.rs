@@ -87,6 +87,8 @@ pub enum IconName {
     PanelRight,
     PanelRightClose,
     PanelRightOpen,
+    Pin,
+    PinOff,
     Plus,
     Redo,
     Redo2,
@@ -190,6 +192,8 @@ impl IconNamed for IconName {
             Self::PanelRight => "icons/panel-right.svg",
             Self::PanelRightClose => "icons/panel-right-close.svg",
             Self::PanelRightOpen => "icons/panel-right-open.svg",
+            Self::Pin => "icons/pin.svg",
+            Self::PinOff => "icons/pin-off.svg",
             Self::Plus => "icons/plus.svg",
             Self::Redo => "icons/redo.svg",
             Self::Redo2 => "icons/redo-2.svg",
@@ -301,9 +305,7 @@ impl Icon {
 
     /// Rotate the icon by the given angle
     pub fn rotate(mut self, radians: impl Into<Radians>) -> Self {
-        self.base = self
-            .base
-            .with_transformation(Transformation::rotate(radians));
+        self.base = self.base.with_transformation(Transformation::rotate(radians));
         self
     }
 }

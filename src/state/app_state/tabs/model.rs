@@ -151,11 +151,6 @@ impl AppState {
         let still_referenced = self.tabs.open.iter().any(|tab| matches_collection(tab, key))
             || self.tabs.preview.as_ref() == Some(key);
         if !still_referenced {
-            // If a background AI stream is still active, signal cancellation before dropping
-            // session state so we do not keep orphaned provider streams alive.
-            if let Some(flag) = self.ai_chat.cancel_flag.as_ref() {
-                flag.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
             self.sessions.remove(key);
         }
     }
@@ -558,6 +553,31 @@ impl AppState {
             state.pending_cursor = content.rfind('{').map(|idx| idx + 1);
             state.content = content;
         }
+
+        self.forge_tabs.insert(id, state);
+        self.tabs.open.push(TabKey::Forge(key));
+        self.set_active_index(self.tabs.open.len() - 1);
+        self.set_selected_connection_internal(connection_id);
+        self.conn.selected_database = Some(database);
+        self.conn.selected_collection = None;
+        self.current_view = View::Forge;
+        self.update_workspace_from_state_debounced();
+        self.clear_error_status();
+        cx.emit(AppEvent::ViewChanged);
+        cx.notify();
+    }
+
+    /// Open a Forge tab with specific content (e.g. an aggregate command from AI chat).
+    pub fn open_forge_tab_with_content(
+        &mut self,
+        connection_id: Uuid,
+        database: String,
+        content: String,
+        cx: &mut Context<Self>,
+    ) {
+        let id = Uuid::new_v4();
+        let key = ForgeTabKey { id, connection_id, database: database.clone() };
+        let state = ForgeTabState { content, pending_cursor: None, ..ForgeTabState::default() };
 
         self.forge_tabs.insert(id, state);
         self.tabs.open.push(TabKey::Forge(key));

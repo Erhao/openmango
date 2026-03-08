@@ -1,11 +1,15 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::StreamExt;
-use rig::agent::MultiTurnStreamItem;
+use rig::agent::{MultiTurnStreamItem, PromptHook, ToolCallHookAction};
 use rig::client::CompletionClient as _;
 use rig::client::Nothing;
-use rig::completion::{Chat as _, Message as RigMessage, Prompt as _, PromptError};
+use rig::completion::{
+    Chat as _, CompletionModel, Message as RigMessage, Prompt as _, PromptError,
+};
 use rig::providers::{anthropic, gemini, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamedUserContent, StreamingChat as _};
 use rig::tool::ToolDyn;
@@ -19,7 +23,56 @@ use crate::ai::tools::{MongoContext, StreamEvent, build_tools, truncate_str};
 
 const HISTORY_LIMIT: usize = 18;
 const MAX_OUTPUT_TOKENS: u32 = 4096;
-const MAX_TURNS: usize = 5;
+const MAX_TURNS: usize = 15;
+const MAX_TOOL_CALLS: usize = 6;
+
+// ---------------------------------------------------------------------------
+// ToolCallLimiter — PromptHook that terminates after N tool calls
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+struct ToolCallLimiter {
+    max_calls: usize,
+    call_count: Arc<AtomicUsize>,
+}
+
+impl ToolCallLimiter {
+    fn new(max_calls: usize) -> Self {
+        Self { max_calls, call_count: Arc::new(AtomicUsize::new(0)) }
+    }
+}
+
+impl<M: CompletionModel> PromptHook<M> for ToolCallLimiter {
+    fn on_tool_call(
+        &self,
+        tool_name: &str,
+        _tool_call_id: Option<String>,
+        _internal_call_id: &str,
+        _args: &str,
+    ) -> impl Future<Output = ToolCallHookAction> + Send {
+        let count = self.call_count.fetch_add(1, Ordering::SeqCst) + 1;
+        let max = self.max_calls;
+        let name = tool_name.to_string();
+        async move {
+            if count > max {
+                log::debug!(
+                    "[ai-hook] skipping: tool call #{count} ({name}) exceeds limit of {max}"
+                );
+                ToolCallHookAction::skip(
+                    "TOOL CALL LIMIT REACHED. Do NOT call any more tools. \
+                     Respond to the user NOW with what you have found so far.",
+                )
+            } else {
+                log::debug!("[ai-hook] allowing tool call #{count}/{max}: {name}");
+                ToolCallHookAction::cont()
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct AiGenerationRequest {
@@ -235,10 +288,12 @@ async fn call_gemini_streaming(
     let client = gemini::Client::new(api_key).map_err(|error| {
         AiError::Runtime(format!("failed to initialize Gemini client: {error}"))
     })?;
+    let limiter = ToolCallLimiter::new(MAX_TOOL_CALLS);
     let agent = client
         .agent(model)
         .preamble(&request.system_prompt)
         .max_tokens(MAX_OUTPUT_TOKENS as u64)
+        .hook(limiter)
         .tools(tools)
         .build();
 
@@ -265,10 +320,12 @@ async fn call_openai_streaming(
     let client = openai::Client::<reqwest::Client>::new(api_key).map_err(|error| {
         AiError::Runtime(format!("failed to initialize OpenAI client: {error}"))
     })?;
+    let limiter = ToolCallLimiter::new(MAX_TOOL_CALLS);
     let agent = client
         .agent(model)
         .preamble(&request.system_prompt)
         .max_tokens(MAX_OUTPUT_TOKENS as u64)
+        .hook(limiter)
         .tools(tools)
         .build();
 
@@ -295,10 +352,12 @@ async fn call_anthropic_streaming(
     let client = anthropic::Client::<reqwest::Client>::new(api_key).map_err(|error| {
         AiError::Runtime(format!("failed to initialize Anthropic client: {error}"))
     })?;
+    let limiter = ToolCallLimiter::new(MAX_TOOL_CALLS);
     let agent = client
         .agent(model)
         .preamble(&request.system_prompt)
         .max_tokens(MAX_OUTPUT_TOKENS as u64)
+        .hook(limiter)
         .tools(tools)
         .build();
 
@@ -345,10 +404,12 @@ async fn call_ollama_streaming(
         .map_err(|error| {
             AiError::Runtime(format!("failed to initialize Ollama client: {error}"))
         })?;
+    let limiter = ToolCallLimiter::new(MAX_TOOL_CALLS);
     let agent = client
         .agent(model)
         .preamble(&request.system_prompt)
         .max_tokens(MAX_OUTPUT_TOKENS as u64)
+        .hook(limiter)
         .tools(tools)
         .build();
 
@@ -372,9 +433,13 @@ async fn consume_stream<R: Clone + Unpin>(
 ) -> Result<String, AiError> {
     let mut full_text = String::new();
     let mut final_text = String::new();
+    let mut turn_count: usize = 0;
+    let mut tool_call_count: usize = 0;
     // Track tool call name by internal_call_id for correlating results
     let mut tool_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+
+    log::debug!("[ai-stream] starting consume_stream for provider={}", provider.label());
 
     while let Some(chunk) = stream.next().await {
         match chunk {
@@ -386,9 +451,11 @@ async fn consume_stream<R: Clone + Unpin>(
                 tool_call,
                 internal_call_id,
             })) => {
+                tool_call_count += 1;
                 let name = tool_call.function.name.clone();
                 let args_full = tool_call.function.arguments.to_string();
                 let args_preview = truncate_str(&args_full, 200).to_string();
+                log::debug!("[ai-stream] tool_call #{tool_call_count}: {name} args={args_preview}");
                 tool_names.insert(internal_call_id, name.clone());
                 let _ = event_tx.send(StreamEvent::ToolCallStart { name, args_preview, args_full });
             }
@@ -396,23 +463,54 @@ async fn consume_stream<R: Clone + Unpin>(
                 tool_result,
                 internal_call_id,
             })) => {
+                turn_count += 1;
                 let name = tool_names
                     .get(&internal_call_id)
                     .cloned()
                     .unwrap_or_else(|| tool_result.id.clone());
                 let (result_preview, result_json) = extract_tool_result(&tool_result);
+                log::debug!(
+                    "[ai-stream] tool_result #{turn_count}: {name} preview={}",
+                    truncate_str(&result_preview, 100)
+                );
                 let _ =
                     event_tx.send(StreamEvent::ToolCallEnd { name, result_preview, result_json });
             }
             Ok(MultiTurnStreamItem::FinalResponse(final_response)) => {
                 final_text = final_response.response().to_string();
+                log::debug!(
+                    "[ai-stream] final_response after {tool_call_count} tool calls, \
+                     {turn_count} results"
+                );
             }
-            Ok(_) => {}
+            Ok(_) => {
+                log::debug!("[ai-stream] other event");
+            }
             Err(error) => {
-                return Err(map_provider_error(provider, error.to_string()));
+                let msg = error.to_string();
+                log::debug!("[ai-stream] error after {tool_call_count} tool calls: {msg}");
+                if msg.contains("MaxTurnError")
+                    || msg.contains("MaxDepthError")
+                    || msg.contains("PromptCancelled")
+                {
+                    if full_text.trim().is_empty() {
+                        let fallback =
+                            "*(Tool call limit reached — see the results above.)*".to_string();
+                        let _ = event_tx.send(StreamEvent::TextDelta(fallback.clone()));
+                        full_text = fallback;
+                    }
+                    break;
+                }
+                return Err(map_provider_error(provider, msg));
             }
         }
     }
+
+    log::debug!(
+        "[ai-stream] stream ended: {tool_call_count} tool calls, \
+         {turn_count} results, text_len={}",
+        full_text.len()
+    );
 
     if full_text.trim().is_empty() {
         full_text = final_text;

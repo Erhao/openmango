@@ -1,7 +1,7 @@
 //! Session management for per-tab collection state.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 
 use mongodb::bson::Document;
 use uuid::Uuid;
@@ -9,7 +9,8 @@ use uuid::Uuid;
 use crate::bson::DocumentKey;
 use crate::state::AppState;
 use crate::state::app_state::types::{
-    CollectionSubview, SessionData, SessionKey, SessionSnapshot, SessionState, SessionViewState,
+    CollectionSubview, DocumentViewMode, SessionData, SessionKey, SessionSnapshot, SessionState,
+    SessionViewState,
 };
 
 #[derive(Default)]
@@ -153,6 +154,60 @@ impl AppState {
 
     pub fn session_subview(&self, key: &SessionKey) -> Option<CollectionSubview> {
         self.session_view(key).map(|view| view.subview)
+    }
+
+    pub fn session_view_mode(&self, key: &SessionKey) -> DocumentViewMode {
+        self.session_view(key).map(|view| view.view_mode).unwrap_or_default()
+    }
+
+    pub fn set_view_mode(&mut self, key: &SessionKey, mode: DocumentViewMode) {
+        if let Some(session) = self.session_mut(key) {
+            session.view.view_mode = mode;
+        }
+    }
+
+    pub fn table_column_widths(&self, key: &SessionKey) -> HashMap<String, f32> {
+        self.session_view(key).map(|v| v.table_column_widths.clone()).unwrap_or_default()
+    }
+
+    pub fn set_table_column_widths(&mut self, key: &SessionKey, widths: HashMap<String, f32>) {
+        if let Some(session) = self.session_mut(key) {
+            session.view.table_column_widths = widths;
+        }
+    }
+
+    pub fn table_column_order(&self, key: &SessionKey) -> Vec<String> {
+        self.session_view(key).map(|v| v.table_column_order.clone()).unwrap_or_default()
+    }
+
+    pub fn set_table_column_order(&mut self, key: &SessionKey, order: Vec<String>) {
+        if let Some(session) = self.session_mut(key) {
+            session.view.table_column_order = order;
+        }
+    }
+
+    pub fn table_pinned_columns(&self, key: &SessionKey) -> HashSet<String> {
+        self.session_view(key).map(|v| v.table_pinned_columns.clone()).unwrap_or_default()
+    }
+
+    pub fn set_table_pinned_columns(&mut self, key: &SessionKey, pinned: HashSet<String>) {
+        if let Some(session) = self.session_mut(key) {
+            session.view.table_pinned_columns = pinned;
+        }
+    }
+
+    pub fn toggle_table_pinned_column(&mut self, key: &SessionKey, column: String) -> bool {
+        if let Some(session) = self.session_mut(key) {
+            let is_pinned = if session.view.table_pinned_columns.contains(&column) {
+                session.view.table_pinned_columns.remove(&column);
+                false
+            } else {
+                session.view.table_pinned_columns.insert(column);
+                true
+            };
+            return is_pinned;
+        }
+        false
     }
 
     /// Get a mutable reference to a session.

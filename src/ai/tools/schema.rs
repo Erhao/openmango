@@ -33,7 +33,10 @@ impl Tool for CollectionSchemaTool {
         ToolDefinition {
             name: Self::NAME.to_string(),
             description: "Sample documents and analyze the schema of a collection. \
-                Returns field names, types, presence percentages, and cardinality."
+                Returns field names, types, presence percentages, cardinality, \
+                and sample values for each field. Use to discover field names, \
+                data shape, and reference patterns (ObjectId fields) before \
+                constructing queries."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",

@@ -30,6 +30,13 @@ pub enum View {
     Changelog,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DocumentViewMode {
+    #[default]
+    Tree,
+    Table,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CollectionSubview {
     #[default]
@@ -1123,11 +1130,15 @@ pub struct SessionViewState {
     pub drafts: HashMap<DocumentKey, Document>,
     pub dirty: HashSet<DocumentKey>,
     pub subview: CollectionSubview,
+    pub view_mode: DocumentViewMode,
     pub stats_open: bool,
     pub query_options_open: bool,
     pub schema_selected_field: Option<String>,
     pub schema_expanded_fields: HashSet<String>,
     pub schema_filter: String,
+    pub table_column_widths: HashMap<String, f32>,
+    pub table_column_order: Vec<String>,
+    pub table_pinned_columns: HashSet<String>,
 }
 
 /// Per-collection session state (one per tab).

@@ -8,6 +8,7 @@ pub mod find;
 pub mod indexes;
 pub mod insert;
 pub mod list_collections;
+pub mod sample_values;
 pub mod schema;
 pub mod update;
 
@@ -78,7 +79,8 @@ pub fn build_tools(ctx: MongoContext) -> Vec<Box<dyn ToolDyn>> {
         Box::new(update::UpdateDocumentsTool::new(ctx.clone())),
         Box::new(delete::DeleteDocumentsTool::new(ctx.clone())),
         Box::new(create_index::CreateIndexTool::new(ctx.clone())),
-        Box::new(self::drop_index::DropIndexTool::new(ctx)),
+        Box::new(self::drop_index::DropIndexTool::new(ctx.clone())),
+        Box::new(sample_values::SampleFieldValuesTool::new(ctx)),
     ]
 }
 
@@ -203,13 +205,12 @@ pub fn resolve_collection(arg: &Option<String>, ctx: &MongoContext) -> Result<St
 }
 
 /// Parse a JSON string into a BSON Document.
+///
+/// Supports MongoDB extended JSON (`{"$oid": "..."}`, `{"$date": "..."}`) and
+/// shell syntax (`ObjectId("...")`, `ISODate("...")`) so that LLM-generated
+/// filters with ObjectId references are correctly converted to BSON types.
 pub fn parse_json_to_doc(json_str: &str) -> Result<bson::Document, ToolError> {
-    let value: serde_json::Value = serde_json::from_str(json_str)?;
-    let bson_val = bson::to_bson(&value).map_err(|e| ToolError::InvalidInput(e.to_string()))?;
-    match bson_val {
-        bson::Bson::Document(doc) => Ok(doc),
-        _ => Err(ToolError::InvalidInput("Expected a JSON object".to_string())),
-    }
+    crate::bson::parse_document_from_json(json_str).map_err(ToolError::InvalidInput)
 }
 
 /// Convert a BSON document to a relaxed JSON value.
@@ -220,6 +221,6 @@ pub fn doc_to_json(doc: &bson::Document) -> serde_json::Value {
 }
 
 const MAX_OUTPUT_BYTES: usize = 32 * 1024;
-const MAX_FIND_LIMIT: i64 = 10;
+const MAX_FIND_LIMIT: i64 = 50;
 
 pub mod drop_index;

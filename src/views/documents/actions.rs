@@ -389,15 +389,45 @@ impl CollectionView {
             );
         }))
         .on_action(cx.listener(|this, _: &CopyValue, _window, cx| {
-            let Some((session_key, meta)) = this.selected_property_context(cx) else {
-                return;
-            };
-            let Some(doc) = this.resolve_document(&session_key, &meta.doc_key, cx) else {
-                return;
-            };
-            if let Some(value) = get_bson_at_path(&doc, &meta.path) {
+            if let Some((session_key, meta)) = this.selected_property_context(cx)
+                && let Some(doc) = this.resolve_document(&session_key, &meta.doc_key, cx)
+                && let Some(value) = get_bson_at_path(&doc, &meta.path)
+            {
                 let text = format_bson_for_clipboard(value);
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
+                return;
+            }
+            let Some(session_key) = this.view_model.current_session() else {
+                return;
+            };
+            let selected_docs: Vec<_> = {
+                let state_ref = this.state.read(cx);
+                let Some(session) = state_ref.session(&session_key) else {
+                    return;
+                };
+                session.view.selected_docs.iter().cloned().collect()
+            };
+            if selected_docs.is_empty() {
+                return;
+            }
+            if selected_docs.len() == 1 {
+                let doc_key = &selected_docs[0];
+                if let Some(doc) = this.resolve_document(&session_key, doc_key, cx) {
+                    let json = document_to_shell_string(&doc);
+                    cx.write_to_clipboard(ClipboardItem::new_string(json));
+                }
+            } else {
+                let state_ref = this.state.read(cx);
+                let docs: Vec<String> = selected_docs
+                    .iter()
+                    .filter_map(|dk| {
+                        state_ref
+                            .session_draft_or_document(&session_key, dk)
+                            .map(|d| document_to_shell_string(&d))
+                    })
+                    .collect();
+                let json = format!("[{}]", docs.join(",\n"));
+                cx.write_to_clipboard(ClipboardItem::new_string(json));
             }
         }))
         .on_action(cx.listener(|this, _: &CopyKey, _window, cx| {
