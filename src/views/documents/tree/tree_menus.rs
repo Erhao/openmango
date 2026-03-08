@@ -5,7 +5,8 @@ use mongodb::bson::{Bson, Document};
 
 use crate::bson::{
     DocumentKey, PathSegment, bson_value_for_edit, document_to_shell_string,
-    format_relaxed_json_value, get_bson_at_path, parse_documents_from_json,
+    format_relaxed_json_value, get_bson_at_path, parse_document_from_json,
+    parse_documents_from_json,
 };
 use crate::keyboard::{
     AddElement, AddField, CopyDocumentJson, CopyKey, CopyValue, DeleteDocument,
@@ -308,6 +309,8 @@ pub(super) fn build_property_menu(
         );
     }
 
+    // ── Copy group ───────────────────────────────────────────────
+    menu = menu.separator();
     menu = menu.item(
         PopupMenuItem::new("Copy Value")
             .icon(Icon::new(IconName::Copy))
@@ -327,7 +330,6 @@ pub(super) fn build_property_menu(
                 }
             }),
     );
-    menu = menu.separator();
     menu = menu.item(
         PopupMenuItem::new("Copy Key")
             .icon(Icon::new(IconName::Copy))
@@ -336,6 +338,74 @@ pub(super) fn build_property_menu(
                 let key_label = key_label.clone();
                 move |_, _window, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(key_label.clone()));
+                }
+            }),
+    );
+    menu = menu.item(
+        PopupMenuItem::new("Copy Field Path").icon(Icon::new(IconName::Copy)).on_click({
+            let path = path.clone();
+            move |_, _window, cx| {
+                let dot_path = path_to_dot_notation(&path);
+                cx.write_to_clipboard(ClipboardItem::new_string(dot_path));
+            }
+        }),
+    );
+    menu =
+        menu.item(PopupMenuItem::new("Copy as JSON").icon(Icon::new(IconName::Braces)).on_click({
+            let state = state.clone();
+            let session_key = session_key.clone();
+            let doc_key = doc_key.clone();
+            let path = path.clone();
+            let key_label = key_label.clone();
+            move |_, _window, cx| {
+                if let Some(doc) = resolve_document(&state, &session_key, &doc_key, cx)
+                    && let Some(value) = get_bson_at_path(&doc, &path)
+                {
+                    let json_value = format_bson_for_clipboard(value);
+                    let needs_quotes = matches!(value, Bson::String(_));
+                    let text = if needs_quotes {
+                        format!(
+                            "\"{}\": {}",
+                            key_label,
+                            serde_json::to_string(&json_value).unwrap_or(json_value)
+                        )
+                    } else {
+                        format!("\"{}\": {}", key_label, json_value)
+                    };
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
+            }
+        }));
+
+    // ── Filter group ──────────────────────────────────────────────
+    let has_value = meta.value.is_some();
+    let is_filterable = has_value && !meta.is_folder;
+    menu = menu.separator();
+    menu = menu.item(
+        PopupMenuItem::new("Filter by This Value")
+            .icon(Icon::new(IconName::Filter))
+            .disabled(!is_filterable)
+            .on_click({
+                let state = state.clone();
+                let session_key = session_key.clone();
+                let doc_key = doc_key.clone();
+                let path = path.clone();
+                move |_, _window, cx| {
+                    apply_value_filter(&state, &session_key, &doc_key, &path, false, cx);
+                }
+            }),
+    );
+    menu = menu.item(
+        PopupMenuItem::new("Exclude This Value")
+            .icon(Icon::new(IconName::FilterX))
+            .disabled(!is_filterable)
+            .on_click({
+                let state = state.clone();
+                let session_key = session_key.clone();
+                let doc_key = doc_key.clone();
+                let path = path.clone();
+                move |_, _window, cx| {
+                    apply_value_filter(&state, &session_key, &doc_key, &path, true, cx);
                 }
             }),
     );
@@ -407,4 +477,60 @@ fn format_bson_for_clipboard(value: &Bson) -> String {
         }
         _ => bson_value_for_edit(value),
     }
+}
+
+fn path_to_dot_notation(path: &[PathSegment]) -> String {
+    let mut result = String::new();
+    for (i, seg) in path.iter().enumerate() {
+        match seg {
+            PathSegment::Key(k) => {
+                if i > 0 {
+                    result.push('.');
+                }
+                result.push_str(k);
+            }
+            PathSegment::Index(idx) => {
+                result.push_str(&format!("[{}]", idx));
+            }
+        }
+    }
+    result
+}
+
+fn bson_value_to_filter_json(value: &Bson) -> String {
+    let ext = value.clone().into_relaxed_extjson();
+    format_relaxed_json_value(&ext)
+}
+
+fn apply_value_filter(
+    state: &Entity<AppState>,
+    session_key: &SessionKey,
+    doc_key: &DocumentKey,
+    path: &[PathSegment],
+    exclude: bool,
+    cx: &mut App,
+) {
+    let Some(doc) = resolve_document(state, session_key, doc_key, cx) else {
+        return;
+    };
+    let Some(value) = get_bson_at_path(&doc, path) else {
+        return;
+    };
+
+    let field = path_to_dot_notation(path);
+    let value_json = bson_value_to_filter_json(value);
+    let filter_raw = if exclude {
+        format!("{{\"{}\": {{\"$ne\": {}}}}}", field, value_json)
+    } else {
+        format!("{{\"{}\": {}}}", field, value_json)
+    };
+
+    let filter_doc = parse_document_from_json(&filter_raw).ok();
+
+    let sk = session_key.clone();
+    state.update(cx, |state, cx| {
+        state.set_filter(&sk, filter_raw, filter_doc);
+        cx.notify();
+    });
+    AppCommands::load_documents_for_session(state.clone(), sk, cx);
 }

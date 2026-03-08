@@ -47,6 +47,7 @@ pub struct DocumentViewModel {
     editing_original: Option<Bson>,
     table_state: Option<Entity<TableState<DocumentTableDelegate>>>,
     table_generation: Option<u64>,
+    col_visibility_search: Option<Entity<InputState>>,
 }
 
 impl DocumentViewModel {
@@ -68,11 +69,16 @@ impl DocumentViewModel {
             editing_original: None,
             table_state: None,
             table_generation: None,
+            col_visibility_search: None,
         }
     }
 
     pub fn tree_state(&self) -> Entity<TreeState> {
         self.tree_state.clone()
+    }
+
+    pub fn table_state(&self) -> Option<&Entity<TableState<DocumentTableDelegate>>> {
+        self.table_state.as_ref()
     }
 
     pub fn node_meta(&self) -> Arc<HashMap<String, NodeMeta>> {
@@ -551,9 +557,13 @@ impl DocumentViewModel {
                 TableEvent::MoveColumn(from_ix, to_ix) => {
                     let from_ix = *from_ix;
                     let to_ix = *to_ix;
+                    if from_ix == 0 || to_ix == 0 {
+                        return;
+                    }
+                    let (data_from, data_to) = (from_ix - 1, to_ix - 1);
                     let order = {
                         ts.update(cx, |ts, _cx| {
-                            ts.delegate_mut().apply_column_move(from_ix, to_ix);
+                            ts.delegate_mut().apply_column_move(data_from, data_to);
                             ts.delegate_mut().column_order()
                         })
                     };
@@ -585,7 +595,17 @@ impl DocumentViewModel {
         let Some(session_key) = self.current_session.clone() else {
             return;
         };
-        let (generation, documents, drafts, is_loading, saved_widths, saved_order, pinned) = {
+        let (
+            generation,
+            documents,
+            drafts,
+            is_loading,
+            saved_widths,
+            saved_order,
+            pinned,
+            hidden,
+            selected_docs,
+        ) = {
             let state_ref = state.read(cx);
             let Some(session) = state_ref.session(&session_key) else {
                 return;
@@ -602,6 +622,8 @@ impl DocumentViewModel {
                 session.view.table_column_widths.clone(),
                 session.view.table_column_order.clone(),
                 session.view.table_pinned_columns.clone(),
+                session.view.table_hidden_columns.clone(),
+                session.view.selected_docs.clone(),
             )
         };
 
@@ -610,6 +632,8 @@ impl DocumentViewModel {
             ts.delegate_mut().set_saved_widths(saved_widths);
             ts.delegate_mut().set_column_order(saved_order);
             ts.delegate_mut().set_pinned_columns(pinned);
+            ts.delegate_mut().set_hidden_columns(hidden);
+            ts.delegate_mut().set_selected_doc_keys(selected_docs);
             ts.delegate_mut().refresh_data(documents, drafts, Some(session_key), is_loading);
             ts.refresh(cx);
         });
@@ -618,5 +642,18 @@ impl DocumentViewModel {
 
     pub fn invalidate_table(&mut self) {
         self.table_generation = None;
+    }
+
+    pub fn ensure_col_visibility_search(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<CollectionView>,
+    ) -> Entity<InputState> {
+        if let Some(ref state) = self.col_visibility_search {
+            return state.clone();
+        }
+        let state = cx.new(|cx| InputState::new(window, cx).placeholder("Search columns..."));
+        self.col_visibility_search = Some(state.clone());
+        state
     }
 }

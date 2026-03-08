@@ -60,6 +60,7 @@ impl CollectionView {
         aggregation_loading: bool,
         explain_loading: bool,
         schema_loading: bool,
+        col_visibility_search: Entity<InputState>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -85,6 +86,11 @@ impl CollectionView {
         // Build action row based on active subview
         let mut documents_toolbar_row: Option<Div> = None;
         let action_row = if is_documents {
+            let table_column_keys: Vec<String> = self
+                .view_model
+                .table_state()
+                .map(|ts| ts.read(cx).delegate().all_column_keys().to_vec())
+                .unwrap_or_default();
             let docs_actions = render_documents_actions(
                 view,
                 self.state.clone(),
@@ -94,6 +100,8 @@ impl CollectionView {
                 any_selected_dirty,
                 is_loading,
                 filter_active,
+                table_column_keys,
+                col_visibility_search,
                 cx,
             );
             documents_toolbar_row = Some(docs_actions);

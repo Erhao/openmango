@@ -1139,6 +1139,7 @@ pub struct SessionViewState {
     pub table_column_widths: HashMap<String, f32>,
     pub table_column_order: Vec<String>,
     pub table_pinned_columns: HashSet<String>,
+    pub table_hidden_columns: HashSet<String>,
 }
 
 /// Per-collection session state (one per tab).

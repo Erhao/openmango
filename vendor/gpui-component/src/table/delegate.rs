@@ -1,14 +1,15 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _, Stateful,
-    Styled as _, Window, div,
+    div, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _, Stateful,
+    Styled as _, Window,
 };
 
 use crate::{
-    ActiveTheme as _, Icon, IconName, Size, h_flex,
+    h_flex,
     menu::PopupMenu,
-    table::{Column, ColumnSort, TableState, loading::Loading},
+    table::{loading::Loading, Column, ColumnSort, TableState},
+    ActiveTheme as _, Icon, IconName, Size,
 };
 
 /// A delegate trait for providing data and rendering for a table.
@@ -51,9 +52,7 @@ pub trait TableDelegate: Sized + 'static {
         window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(self.column(col_ix, cx).name.clone())
+        div().size_full().child(self.column(col_ix, cx).name.clone())
     }
 
     /// Render the row at the given row and column.
@@ -69,13 +68,16 @@ pub trait TableDelegate: Sized + 'static {
     }
 
     /// Render the context menu for the row at the given row index.
+    /// `selected_col` is the currently selected column (if any).
     fn context_menu(
         &mut self,
         row_ix: usize,
+        selected_col: Option<usize>,
         menu: PopupMenu,
         window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> PopupMenu {
+        let _ = selected_col;
         menu
     }
 

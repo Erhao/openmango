@@ -9,10 +9,10 @@ use crate::{
 };
 use gpui::{
     canvas, div, prelude::FluentBuilder, px, uniform_list, AppContext, Axis, Bounds, ClickEvent,
-    Context, Div, DragMoveEvent, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, Pixels, Point,
-    Render, ScrollStrategy, SharedString, Stateful, StatefulInteractiveElement as _, Styled, Task,
-    UniformListScrollHandle, Window,
+    Context, Div, DragMoveEvent, ElementId, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent,
+    ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled, Task, UniformListScrollHandle, Window,
 };
 
 use super::*;
@@ -99,6 +99,7 @@ pub struct TableState<D: TableDelegate> {
     selected_row: Option<usize>,
     selection_state: SelectionState,
     right_clicked_row: Option<usize>,
+    right_clicked_col: Option<usize>,
     selected_col: Option<usize>,
 
     /// The column index that is being resized.
@@ -127,6 +128,7 @@ where
             selection_state: SelectionState::Row,
             selected_row: None,
             right_clicked_row: None,
+            right_clicked_col: None,
             selected_col: None,
             resizing_col: None,
             bounds: Bounds::default(),
@@ -226,6 +228,7 @@ where
 
         self.selection_state = SelectionState::Row;
         self.right_clicked_row = None;
+        self.right_clicked_col = None;
         self.selected_row = Some(row_ix);
         if let Some(row_ix) = self.selected_row {
             self.vertical_scroll_handle.scroll_to_item(
@@ -973,11 +976,22 @@ where
                                 let mut items = Vec::with_capacity(left_columns_count);
 
                                 (0..left_columns_count).for_each(|col_ix| {
-                                    items.push(self.render_col_wrap(col_ix, window, cx).child(
-                                        self.render_cell(col_ix, window, cx).child(
-                                            self.measure_render_td(row_ix, col_ix, window, cx),
-                                        ),
-                                    ));
+                                    items.push(
+                                        self.render_col_wrap(col_ix, window, cx)
+                                            .child(self.render_cell(col_ix, window, cx).child(
+                                                self.measure_render_td(row_ix, col_ix, window, cx),
+                                            ))
+                                            .id(ElementId::NamedInteger(
+                                                "cell-rc".into(),
+                                                (row_ix * 10000 + col_ix) as u64,
+                                            ))
+                                            .on_mouse_down(
+                                                MouseButton::Right,
+                                                cx.listener(move |this, _, _, _| {
+                                                    this.right_clicked_col = Some(col_ix);
+                                                }),
+                                            ),
+                                    );
                                 });
 
                                 items
@@ -1023,13 +1037,22 @@ where
 
                                         visible_range.for_each(|col_ix| {
                                             let col_ix = col_ix + left_columns_count;
-                                            let el =
-                                                table.render_col_wrap(col_ix, window, cx).child(
-                                                    table.render_cell(col_ix, window, cx).child(
-                                                        table.measure_render_td(
-                                                            row_ix, col_ix, window, cx,
-                                                        ),
+                                            let el = table
+                                                .render_col_wrap(col_ix, window, cx)
+                                                .child(table.render_cell(col_ix, window, cx).child(
+                                                    table.measure_render_td(
+                                                        row_ix, col_ix, window, cx,
                                                     ),
+                                                ))
+                                                .id(ElementId::NamedInteger(
+                                                    "cell-rc".into(),
+                                                    (row_ix * 10000 + col_ix) as u64,
+                                                ))
+                                                .on_mouse_down(
+                                                    MouseButton::Right,
+                                                    cx.listener(move |this, _, _, _| {
+                                                        this.right_clicked_col = Some(col_ix);
+                                                    }),
                                                 );
 
                                             items.push(el);
@@ -1245,8 +1268,15 @@ where
                 let view = cx.entity().clone();
                 move |this, window: &mut Window, cx: &mut Context<PopupMenu>| {
                     if let Some(row_ix) = view.read(cx).right_clicked_row {
+                        let right_clicked_col = view.read(cx).right_clicked_col;
                         view.update(cx, |menu, cx| {
-                            menu.delegate_mut().context_menu(row_ix, this, window, cx)
+                            menu.delegate_mut().context_menu(
+                                row_ix,
+                                right_clicked_col,
+                                this,
+                                window,
+                                cx,
+                            )
                         })
                     } else {
                         this
@@ -1340,6 +1370,7 @@ where
                     .when(right_clicked_row.is_some(), |this| {
                         this.on_mouse_down_out(cx.listener(|this, _, _, cx| {
                             this.right_clicked_row = None;
+                            this.right_clicked_col = None;
                             cx.notify();
                         }))
                     })

@@ -1,13 +1,17 @@
 //! Action buttons rendering for collection header.
 
+use std::collections::{HashMap, HashSet};
+
 use gpui::*;
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button as MenuButton, ButtonCustomVariant, ButtonVariants as _};
+use gpui_component::checkbox::Checkbox;
+use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::popover::Popover;
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::{Disableable as _, Icon, IconName, Sizable as _, Size};
 use mongodb::bson::Document;
-
-use std::collections::HashMap;
 
 use crate::bson::DocumentKey;
 use crate::components::{Button, open_confirm_dialog};
@@ -30,6 +34,8 @@ pub fn render_documents_actions(
     any_selected_dirty: bool,
     is_loading: bool,
     filter_active: bool,
+    table_column_keys: Vec<String>,
+    col_visibility_search: Entity<InputState>,
     cx: &mut Context<CollectionView>,
 ) -> Div {
     let (ai_available, ai_loading, ai_panel_open) = {
@@ -53,6 +59,8 @@ pub fn render_documents_actions(
         ai_available,
         ai_loading,
         ai_panel_open,
+        table_column_keys,
+        col_visibility_search,
         cx,
     )
 }
@@ -269,6 +277,8 @@ fn render_documents_actions_clean(
     ai_available: bool,
     ai_loading: bool,
     ai_panel_open: bool,
+    table_column_keys: Vec<String>,
+    col_visibility_search: Entity<InputState>,
     cx: &mut Context<CollectionView>,
 ) -> Div {
     let state_for_refresh = state.clone();
@@ -523,6 +533,7 @@ fn render_documents_actions_clean(
                         state.set_table_column_widths(&sk, HashMap::new());
                         state.set_table_column_order(&sk, Vec::new());
                         state.set_table_pinned_columns(&sk, std::collections::HashSet::new());
+                        state.set_table_hidden_columns(&sk, std::collections::HashSet::new());
                         cx.notify();
                     });
                     view.update(cx, |this, cx| {
@@ -538,8 +549,189 @@ fn render_documents_actions_clean(
         None
     };
 
+    let columns_visibility_btn = if is_table {
+        let all_keys = table_column_keys;
+
+        if all_keys.is_empty() {
+            None
+        } else {
+            let clean_variant = ButtonCustomVariant::new(cx)
+                .color(cx.theme().transparent)
+                .foreground(cx.theme().muted_foreground)
+                .border(cx.theme().transparent)
+                .hover(cx.theme().secondary.opacity(0.5))
+                .active(cx.theme().secondary.opacity(0.62))
+                .shadow(false);
+            let trigger_btn = MenuButton::new("columns-visibility")
+                .compact()
+                .rounded(borders::radius_sm())
+                .with_size(Size::Small)
+                .custom(clean_variant)
+                .icon(Icon::new(IconName::Eye).xsmall())
+                .tooltip("Show/hide columns");
+
+            let sk = session_key.clone();
+            let search = col_visibility_search.clone();
+            let state_pop = state.clone();
+            let view_pop = view.clone();
+
+            Some(
+                Popover::new("col-visibility-popover")
+                    .anchor(gpui::Corner::TopLeft)
+                    .trigger(trigger_btn)
+                    .content(move |_ps, _window, cx| {
+                        let query = search.read(cx).value().to_string().to_lowercase();
+                        let hidden: HashSet<String> = sk
+                            .as_ref()
+                            .map(|sk| state_pop.read(cx).table_hidden_columns(sk))
+                            .unwrap_or_default();
+
+                        let filtered: Vec<&String> = all_keys
+                            .iter()
+                            .filter(|k| k.as_str() != "_id")
+                            .filter(|k| query.is_empty() || k.to_lowercase().contains(&query))
+                            .collect();
+
+                        let rows: Vec<_> = filtered
+                            .iter()
+                            .map(|key| {
+                                let is_visible = !hidden.contains(key.as_str());
+                                let label: SharedString = (*key).clone().into();
+                                let col_key = (*key).clone();
+                                let state_cb = state_pop.clone();
+                                let view_cb = view_pop.clone();
+                                let sk_cb = sk.clone();
+                                div()
+                                    .id(SharedString::from(format!("col-row-{}", key)))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded(borders::radius_sm())
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(gpui::hsla(0., 0., 0.5, 0.1)))
+                                    .on_click(move |_, _window, cx| {
+                                        let Some(sk) = sk_cb.clone() else {
+                                            return;
+                                        };
+                                        state_cb.update(cx, |state, cx| {
+                                            state.toggle_table_hidden_column(&sk, col_key.clone());
+                                            cx.notify();
+                                        });
+                                        view_cb.update(cx, |this, cx| {
+                                            this.view_model.invalidate_table();
+                                            cx.notify();
+                                        });
+                                    })
+                                    .child(
+                                        Checkbox::new(SharedString::from(format!(
+                                            "col-vis-{}",
+                                            key
+                                        )))
+                                        .checked(is_visible)
+                                        .with_size(Size::XSmall),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_ellipsis()
+                                            .overflow_x_hidden()
+                                            .max_w(px(170.0))
+                                            .child(label),
+                                    )
+                            })
+                            .collect();
+                        let list = div()
+                            .flex()
+                            .flex_col()
+                            .max_h(rems(16.))
+                            .overflow_y_scrollbar()
+                            .children(rows);
+
+                        let state_show = state_pop.clone();
+                        let view_show = view_pop.clone();
+                        let sk_show = sk.clone();
+                        let all_keys_for_hide: HashSet<String> =
+                            all_keys.iter().filter(|k| k.as_str() != "_id").cloned().collect();
+                        let state_hide = state_pop.clone();
+                        let view_hide = view_pop.clone();
+                        let sk_hide = sk.clone();
+
+                        let actions_row = div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .child(
+                                div()
+                                    .id("col-vis-show-all")
+                                    .text_xs()
+                                    .text_color(gpui::hsla(210. / 360., 0.8, 0.55, 1.0))
+                                    .cursor_pointer()
+                                    .child("Show All")
+                                    .on_click(move |_, _window, cx| {
+                                        let Some(sk) = sk_show.clone() else {
+                                            return;
+                                        };
+                                        state_show.update(cx, |state, cx| {
+                                            state.set_table_hidden_columns(&sk, HashSet::new());
+                                            cx.notify();
+                                        });
+                                        view_show.update(cx, |this, cx| {
+                                            this.view_model.invalidate_table();
+                                            cx.notify();
+                                        });
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .id("col-vis-hide-all")
+                                    .text_xs()
+                                    .text_color(gpui::hsla(210. / 360., 0.8, 0.55, 1.0))
+                                    .cursor_pointer()
+                                    .child("Hide All")
+                                    .on_click(move |_, _window, cx| {
+                                        let Some(sk) = sk_hide.clone() else {
+                                            return;
+                                        };
+                                        state_hide.update(cx, |state, cx| {
+                                            state.set_table_hidden_columns(
+                                                &sk,
+                                                all_keys_for_hide.clone(),
+                                            );
+                                            cx.notify();
+                                        });
+                                        view_hide.update(cx, |this, cx| {
+                                            this.view_model.invalidate_table();
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+
+                        div()
+                            .flex()
+                            .flex_col()
+                            .w(px(220.0))
+                            .gap(px(4.0))
+                            .p(px(6.0))
+                            .child(Input::new(&search).small())
+                            .child(actions_row)
+                            .child(list)
+                            .into_any_element()
+                    }),
+            )
+        }
+    } else {
+        None
+    };
+
     let mut row = div().flex().items_center().gap(px(2.0)).child(tree_btn).child(table_btn);
     if let Some(btn) = reset_columns_btn {
+        row = row.child(btn);
+    }
+    if let Some(btn) = columns_visibility_btn {
         row = row.child(btn);
     }
     row.child(toolbar_separator(cx))

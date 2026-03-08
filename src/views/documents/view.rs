@@ -527,8 +527,7 @@ impl Render for CollectionView {
         let projection_state = self.projection_state.clone();
         let schema_filter_state = self.schema_filter_state.clone();
 
-        let state_for_prev = self.state.clone();
-        let state_for_next = self.state.clone();
+        let per_page_i64 = per_page;
 
         let mut key_context = String::from("Documents");
         match subview {
@@ -538,6 +537,8 @@ impl Render for CollectionView {
             CollectionSubview::Schema => key_context.push_str(" Schema"),
             CollectionSubview::Documents => {}
         }
+
+        let col_visibility_search = self.view_model.ensure_col_visibility_search(window, cx);
 
         let mut root = div().key_context(key_context.as_str());
         root = self.bind_root_actions(root, cx);
@@ -566,6 +567,7 @@ impl Render for CollectionView {
                 aggregation.loading,
                 explain.loading,
                 schema_loading,
+                col_visibility_search,
                 window,
                 cx,
             ),
@@ -577,13 +579,12 @@ impl Render for CollectionView {
                 total,
                 display_page,
                 total_pages,
+                per_page_i64,
                 range_start,
                 range_end,
                 is_loading,
                 session_key.clone(),
                 selected_docs,
-                state_for_prev,
-                state_for_next,
                 window,
                 cx,
             ),

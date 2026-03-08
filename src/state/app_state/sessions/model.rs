@@ -210,6 +210,26 @@ impl AppState {
         false
     }
 
+    pub fn table_hidden_columns(&self, key: &SessionKey) -> HashSet<String> {
+        self.session_view(key).map(|v| v.table_hidden_columns.clone()).unwrap_or_default()
+    }
+
+    pub fn set_table_hidden_columns(&mut self, key: &SessionKey, hidden: HashSet<String>) {
+        if let Some(session) = self.session_mut(key) {
+            session.view.table_hidden_columns = hidden;
+        }
+    }
+
+    pub fn toggle_table_hidden_column(&mut self, key: &SessionKey, column: String) {
+        if let Some(session) = self.session_mut(key) {
+            if session.view.table_hidden_columns.contains(&column) {
+                session.view.table_hidden_columns.remove(&column);
+            } else {
+                session.view.table_hidden_columns.insert(column);
+            }
+        }
+    }
+
     /// Get a mutable reference to a session.
     pub fn session_mut(&mut self, key: &SessionKey) -> Option<&mut SessionState> {
         self.sessions.get_mut(key)

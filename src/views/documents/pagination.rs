@@ -2,7 +2,9 @@
 
 use gpui::*;
 use gpui_component::ActiveTheme as _;
-use gpui_component::{Icon, IconName, Sizable as _};
+use gpui_component::button::{Button as MenuButton, ButtonVariants as _};
+use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::{Disableable as _, Icon, IconName, Sizable as _};
 
 use crate::components::Button;
 use crate::state::{AppCommands, AppState, SessionKey};
@@ -10,23 +12,67 @@ use crate::theme::spacing;
 
 use super::CollectionView;
 
+const PER_PAGE_OPTIONS: &[i64] = &[10, 25, 50, 100];
+
 impl CollectionView {
-    /// Render pagination controls.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_pagination(
         page: u64,
         total_pages: u64,
+        per_page: i64,
         range_start: u64,
         range_end: u64,
         total: u64,
         is_loading: bool,
         session_key: Option<SessionKey>,
-        state_for_prev: Entity<AppState>,
-        state_for_next: Entity<AppState>,
+        state: Entity<AppState>,
+        view: Entity<CollectionView>,
         cx: &App,
     ) -> impl IntoElement {
+        let state_for_prev = state.clone();
+        let state_for_next = state.clone();
         let session_key_prev = session_key.clone();
         let session_key_next = session_key.clone();
+
+        let per_page_selector = {
+            let label = format!("{} / page", per_page);
+            let btn = MenuButton::new("per-page-selector")
+                .ghost()
+                .compact()
+                .label(label)
+                .dropdown_caret(true)
+                .with_size(gpui_component::Size::XSmall)
+                .disabled(is_loading || session_key.is_none());
+
+            let sk = session_key.clone();
+            btn.dropdown_menu_with_anchor(Corner::TopLeft, move |mut menu: PopupMenu, _, _| {
+                for &opt in PER_PAGE_OPTIONS {
+                    let label = format!("{}", opt);
+                    let state = state.clone();
+                    let view = view.clone();
+                    let sk = sk.clone();
+                    let is_current = opt == per_page;
+                    menu = menu.item(PopupMenuItem::new(label).checked(is_current).on_click(
+                        move |_, _, cx| {
+                            let Some(sk) = sk.clone() else {
+                                return;
+                            };
+                            state.update(cx, |state, cx| {
+                                state.set_per_page(&sk, opt);
+                                cx.notify();
+                            });
+                            view.update(cx, |this, cx| {
+                                this.view_model.invalidate_table();
+                                cx.notify();
+                            });
+                            AppCommands::load_documents_for_session(state.clone(), sk, cx);
+                        },
+                    ));
+                }
+                menu
+            })
+        };
+
         div()
             .flex()
             .items_center()
@@ -35,9 +81,16 @@ impl CollectionView {
             .py(px(5.0))
             .child(
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("Showing {}-{} of {}", range_start, range_end, total)),
+                    .flex()
+                    .items_center()
+                    .gap(spacing::sm())
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Showing {}-{} of {}", range_start, range_end, total)),
+                    )
+                    .child(per_page_selector),
             )
             .child(
                 div()

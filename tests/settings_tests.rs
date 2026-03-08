@@ -126,6 +126,7 @@ fn test_workspace_tab_forge_roundtrip() {
         table_column_widths: HashMap::new(),
         table_column_order: Vec::new(),
         table_pinned_columns: HashSet::new(),
+        table_hidden_columns: HashSet::new(),
     };
 
     let json = serde_json::to_string(&tab).expect("should serialize");

@@ -211,6 +211,7 @@ impl AppState {
             session.view.table_column_widths = tab.table_column_widths.clone();
             session.view.table_column_order = tab.table_column_order.clone();
             session.view.table_pinned_columns = tab.table_pinned_columns.clone();
+            session.view.table_hidden_columns = tab.table_hidden_columns.clone();
             session.data.aggregation.stages = tab.aggregation_pipeline.clone();
             session.data.aggregation.stage_doc_counts =
                 vec![StageDocCounts::default(); session.data.aggregation.stages.len()];
@@ -243,6 +244,7 @@ impl AppState {
                     table_column_widths,
                     table_column_order,
                     table_pinned_columns,
+                    table_hidden_columns,
                 ) = self
                     .session(key)
                     .map(|session| {
@@ -256,6 +258,7 @@ impl AppState {
                             session.view.table_column_widths.clone(),
                             session.view.table_column_order.clone(),
                             session.view.table_pinned_columns.clone(),
+                            session.view.table_hidden_columns.clone(),
                         )
                     })
                     .unwrap_or_else(|| {
@@ -268,6 +271,7 @@ impl AppState {
                             false,
                             HashMap::new(),
                             Vec::new(),
+                            HashSet::new(),
                             HashSet::new(),
                         )
                     });
@@ -290,6 +294,7 @@ impl AppState {
                     table_column_widths,
                     table_column_order,
                     table_pinned_columns,
+                    table_hidden_columns,
                 }
             }
             TabKey::Database(key) => WorkspaceTab {
@@ -311,6 +316,7 @@ impl AppState {
                 table_column_widths: HashMap::new(),
                 table_column_order: Vec::new(),
                 table_pinned_columns: HashSet::new(),
+                table_hidden_columns: HashSet::new(),
             },
             TabKey::Transfer(key) => {
                 let transfer = self.transfer_tabs.get(&key.id).cloned().unwrap_or_default();
@@ -333,6 +339,7 @@ impl AppState {
                     table_column_widths: HashMap::new(),
                     table_column_order: Vec::new(),
                     table_pinned_columns: HashSet::new(),
+                    table_hidden_columns: HashSet::new(),
                 }
             }
             TabKey::Forge(key) => {
@@ -360,6 +367,7 @@ impl AppState {
                     table_column_widths: HashMap::new(),
                     table_column_order: Vec::new(),
                     table_pinned_columns: HashSet::new(),
+                    table_hidden_columns: HashSet::new(),
                 }
             }
             TabKey::Settings | TabKey::Changelog => {
@@ -383,6 +391,7 @@ impl AppState {
                     table_column_widths: HashMap::new(),
                     table_column_order: Vec::new(),
                     table_pinned_columns: HashSet::new(),
+                    table_hidden_columns: HashSet::new(),
                 }
             }
         }
@@ -542,6 +551,7 @@ mod tests {
             table_column_widths: HashMap::new(),
             table_column_order: Vec::new(),
             table_pinned_columns: HashSet::new(),
+            table_hidden_columns: HashSet::new(),
         });
         state.workspace.active_tab = Some(0);
         let _active = state.restore_tabs_from_workspace(conn_id, &["db".to_string()]);

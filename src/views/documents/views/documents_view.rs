@@ -8,7 +8,7 @@ use gpui_component::{Icon, IconName, Sizable as _};
 
 use crate::bson::DocumentKey;
 use crate::components::Button;
-use crate::state::{AppState, DocumentViewMode, SessionDocument, SessionKey};
+use crate::state::{DocumentViewMode, SessionDocument, SessionKey};
 use crate::theme::spacing;
 
 use super::super::CollectionView;
@@ -23,17 +23,15 @@ impl CollectionView {
         total: u64,
         display_page: u64,
         total_pages: u64,
+        per_page: i64,
         range_start: u64,
         range_end: u64,
         is_loading: bool,
         session_key: Option<SessionKey>,
         selected_docs: std::collections::HashSet<DocumentKey>,
-        state_for_prev: Entity<AppState>,
-        state_for_next: Entity<AppState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Check view mode — delegate to table view if in Table mode.
         let view_mode = session_key
             .as_ref()
             .map(|sk| self.state.read(cx).session_view_mode(sk))
@@ -44,13 +42,12 @@ impl CollectionView {
                 total,
                 display_page,
                 total_pages,
+                per_page,
                 range_start,
                 range_end,
                 is_loading,
                 session_key,
                 selected_docs,
-                state_for_prev,
-                state_for_next,
                 window,
                 cx,
             );
@@ -464,18 +461,20 @@ impl CollectionView {
                     )),
             );
 
+        let view = cx.entity();
         let main_panel =
             div().flex().flex_col().flex_1().min_w(px(0.0)).child(documents_view).child(
                 Self::render_pagination(
                     display_page,
                     total_pages,
+                    per_page,
                     range_start,
                     range_end,
                     total,
                     is_loading,
                     session_key.clone(),
-                    state_for_prev,
-                    state_for_next,
+                    self.state.clone(),
+                    view,
                     cx,
                 ),
             );

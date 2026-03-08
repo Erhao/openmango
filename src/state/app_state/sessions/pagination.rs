@@ -23,6 +23,13 @@ impl AppState {
         }
         false
     }
+
+    pub fn set_per_page(&mut self, session_key: &SessionKey, per_page: i64) {
+        if let Some(session) = self.session_mut(session_key) {
+            session.data.per_page = per_page;
+            session.data.page = 0;
+        }
+    }
 }
 
 #[cfg(test)]

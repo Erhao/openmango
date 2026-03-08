@@ -2,7 +2,7 @@ use gpui::*;
 use gpui_component::table::Table;
 
 use crate::bson::DocumentKey;
-use crate::state::{AppState, SessionDocument, SessionKey};
+use crate::state::{SessionDocument, SessionKey};
 
 use super::super::CollectionView;
 
@@ -14,13 +14,12 @@ impl CollectionView {
         total: u64,
         display_page: u64,
         total_pages: u64,
+        per_page: i64,
         range_start: u64,
         range_end: u64,
         is_loading: bool,
         session_key: Option<SessionKey>,
         _selected_docs: std::collections::HashSet<DocumentKey>,
-        state_for_prev: Entity<AppState>,
-        state_for_next: Entity<AppState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -46,13 +45,14 @@ impl CollectionView {
                 Self::render_pagination(
                     display_page,
                     total_pages,
+                    per_page,
                     range_start,
                     range_end,
                     total,
                     is_loading,
                     session_key.clone(),
-                    state_for_prev,
-                    state_for_next,
+                    self.state.clone(),
+                    view,
                     cx,
                 ),
             );

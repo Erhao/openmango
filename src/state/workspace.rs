@@ -79,6 +79,8 @@ pub struct WorkspaceTab {
     pub table_column_order: Vec<String>,
     #[serde(default)]
     pub table_pinned_columns: HashSet<String>,
+    #[serde(default)]
+    pub table_hidden_columns: HashSet<String>,
 }
 
 impl WorkspaceTab {
@@ -218,6 +220,7 @@ mod tests {
             table_column_widths: HashMap::new(),
             table_column_order: Vec::new(),
             table_pinned_columns: HashSet::new(),
+            table_hidden_columns: HashSet::new(),
         };
 
         let encoded = serde_json::to_string(&tab).expect("workspace tab should serialize");
