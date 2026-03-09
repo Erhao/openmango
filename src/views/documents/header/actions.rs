@@ -312,6 +312,49 @@ fn render_copy_as_dropdown(
         })
 }
 
+fn render_export_dropdown(
+    state: Entity<AppState>,
+    session_key: Option<SessionKey>,
+    cx: &App,
+) -> impl IntoElement {
+    use crate::state::AppCommands;
+    use crate::views::documents::export::FileExportFormat;
+
+    let clean_variant = ButtonCustomVariant::new(cx)
+        .color(cx.theme().transparent)
+        .foreground(cx.theme().muted_foreground)
+        .border(cx.theme().transparent)
+        .hover(cx.theme().secondary.opacity(0.5))
+        .active(cx.theme().secondary.opacity(0.62))
+        .shadow(false);
+
+    MenuButton::new("export-dropdown")
+        .compact()
+        .rounded(borders::radius_sm())
+        .with_size(Size::Small)
+        .custom(clean_variant)
+        .label("Export")
+        .icon(Icon::new(IconName::Download).xsmall())
+        .tooltip("Export all matching documents to file")
+        .disabled(session_key.is_none())
+        .dropdown_menu_with_anchor(Corner::TopLeft, move |menu: PopupMenu, _window, _cx| {
+            let mut menu = menu;
+            for &fmt in FileExportFormat::all() {
+                let state_click = state.clone();
+                let sk = session_key.clone();
+                let item = PopupMenuItem::new(fmt.label())
+                    .icon(Icon::new(IconName::File))
+                    .on_click(move |_, _window, cx| {
+                        if let Some(sk) = sk.clone() {
+                            AppCommands::save_as_file(state_click.clone(), sk, fmt, cx);
+                        }
+                    });
+                menu = menu.item(item);
+            }
+            menu
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_documents_actions_clean(
     view: Entity<CollectionView>,
@@ -498,6 +541,7 @@ fn render_documents_actions_clean(
         session_key.as_ref().map(|sk| state.read(cx).session_view_mode(sk)).unwrap_or_default();
 
     let copy_as_dropdown = render_copy_as_dropdown(view.clone(), view_mode, cx);
+    let export_dropdown = render_export_dropdown(state.clone(), session_key.clone(), cx);
 
     let secondary_actions_menu = render_documents_secondary_menu(
         state_for_dialog.clone(),
@@ -796,6 +840,8 @@ fn render_documents_actions_clean(
         .child(refresh_button)
         .child(toolbar_separator(cx))
         .child(copy_as_dropdown)
+        .child(export_dropdown)
+        .children(render_export_progress(state.clone(), cx))
         .child(toolbar_separator(cx))
         .child(secondary_actions_menu)
 }
@@ -925,6 +971,44 @@ fn render_documents_secondary_menu(
 
             menu
         })
+}
+
+fn render_export_progress(state: Entity<AppState>, cx: &App) -> Option<Div> {
+    let progress = state.read(cx).export_progress()?;
+    let count = progress.count;
+    let format_label = progress.format.label();
+    let cancellation = progress.cancellation.clone();
+
+    Some(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .pl(px(4.0))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{} {}…", count, format_label)),
+            )
+            .child(
+                crate::components::Button::new("cancel-export")
+                    .ghost()
+                    .compact()
+                    .icon(Icon::new(IconName::Close).size(px(12.0)))
+                    .tooltip("Cancel export")
+                    .on_click(move |_, _, cx| {
+                        cancellation.cancel();
+                        state.update(cx, |state, cx| {
+                            state.set_export_progress(None);
+                            state.set_status_message(Some(crate::state::StatusMessage::info(
+                                "Export cancelled",
+                            )));
+                            cx.notify();
+                        });
+                    }),
+            ),
+    )
 }
 
 fn clean_toolbar_icon_button(button: Button, icon: IconName, tooltip: &'static str) -> Button {

@@ -45,6 +45,11 @@ impl FileFilter {
         Self::new("BSON Archive", vec!["archive", "bson"])
     }
 
+    /// Excel filter
+    pub fn excel() -> Self {
+        Self::new("Excel", vec!["xlsx"])
+    }
+
     /// All supported import formats
     #[allow(dead_code)]
     pub fn all_import() -> Self {

@@ -112,6 +112,9 @@ pub struct AppState {
     // Auto-update
     pub update_status: UpdateStatus,
 
+    // Lightweight file export progress (Save As)
+    export_progress: Option<crate::state::commands::ExportProgress>,
+
     // Shared detached JSON editor sessions
     editor_sessions: EditorSessionStore,
 }
@@ -177,6 +180,7 @@ impl AppState {
             changelog_pending: false,
             aggregation_workspace_save_gen,
             update_status: UpdateStatus::Idle,
+            export_progress: None,
             editor_sessions: EditorSessionStore::default(),
         }
     }
@@ -200,6 +204,21 @@ impl AppState {
 
     pub fn clear_status_message(&mut self) {
         self.status_message = None;
+    }
+
+    pub fn export_progress(&self) -> Option<&crate::state::commands::ExportProgress> {
+        self.export_progress.as_ref()
+    }
+
+    pub fn export_progress_mut(&mut self) -> Option<&mut crate::state::commands::ExportProgress> {
+        self.export_progress.as_mut()
+    }
+
+    pub fn set_export_progress(
+        &mut self,
+        progress: Option<crate::state::commands::ExportProgress>,
+    ) {
+        self.export_progress = progress;
     }
 
     pub fn ai_assistant_available(&self) -> bool {

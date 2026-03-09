@@ -7,6 +7,7 @@
 //! - Progress callbacks for large exports
 
 mod csv;
+mod excel;
 mod json;
 
 use mongodb::Client;

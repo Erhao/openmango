@@ -1,8 +1,10 @@
 //! WYSIWYG clipboard export — copy documents in multiple formats.
 
+pub mod file_export;
 mod formats;
 mod snapshot;
 
+pub use file_export::FileExportFormat;
 pub use formats::render_to_clipboard;
 pub use snapshot::{ExportScope, ViewExportSnapshot};
 

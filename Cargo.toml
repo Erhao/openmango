@@ -55,6 +55,7 @@ rand = "0.10"
 sha2 = "0.10"
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 tempfile = "3.26"
+rust_xlsxwriter = { version = "0.93", features = ["constant_memory"] }
 
 [dev-dependencies]
 cargo-husky = { version = "1", default-features = false, features = [
