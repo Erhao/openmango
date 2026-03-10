@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use gpui::*;
 use gpui_component::input::InputState;
@@ -34,6 +35,8 @@ pub(crate) struct Sidebar {
     width: Pixels,
     collapsed: bool,
     sticky_connection_index: Option<usize>,
+    typeahead_clear_task: Option<Task<()>>,
+    last_tree_click: Option<(TreeNodeId, Instant)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -170,6 +173,55 @@ impl Sidebar {
             async {}
         }));
 
+        subscriptions.push(cx.observe_keystrokes(|this, event, window, cx| {
+            if event.action.is_some() {
+                return;
+            }
+            if this.focus_handle.is_focused(window) {
+                return;
+            }
+            if this.search_state.read(cx).focus_handle(cx).is_focused(window) {
+                return;
+            }
+            if this.model.search_open || this.collapsed {
+                return;
+            }
+            let ks = &event.keystroke;
+            let key = ks.key.to_lowercase();
+            let has_query = !this.model.typeahead_query.is_empty();
+
+            if key == "enter" || key == "return" {
+                this.clear_typeahead(cx);
+                this.handle_open_selection(window, cx);
+                return;
+            }
+            if key == "escape" && has_query {
+                this.clear_typeahead(cx);
+                return;
+            }
+            if key == "backspace" && has_query {
+                this.model.typeahead_query.pop();
+                this.model.typeahead_last = Some(std::time::Instant::now());
+                if this.model.typeahead_query.is_empty() {
+                    this.typeahead_clear_task = None;
+                } else {
+                    this.select_typeahead_match(cx);
+                    this.schedule_typeahead_clear(cx);
+                }
+                cx.notify();
+                return;
+            }
+            if key == "up" || key == "arrowup" {
+                this.move_sidebar_selection(-1, cx);
+                return;
+            }
+            if key == "down" || key == "arrowdown" {
+                this.move_sidebar_selection(1, cx);
+                return;
+            }
+            this.handle_typeahead_keystroke(ks, cx);
+        }));
+
         let sidebar = Self {
             state,
             model,
@@ -179,6 +231,8 @@ impl Sidebar {
             width: SIDEBAR_DEFAULT_WIDTH,
             collapsed: false,
             sticky_connection_index: None,
+            typeahead_clear_task: None,
+            last_tree_click: None,
             _subscriptions: subscriptions,
         };
 
@@ -363,6 +417,7 @@ impl Sidebar {
     }
 
     fn handle_open_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_typeahead(cx);
         if self.model.search_open {
             let query = self.search_state.read(cx).value().to_string();
             let results = self.search_results(&query, cx);
@@ -503,6 +558,18 @@ impl Sidebar {
         if let Some(uri) = self.state.read(cx).connection_uri(connection_id) {
             cx.write_to_clipboard(ClipboardItem::new_string(uri));
         }
+    }
+
+    pub(super) fn register_tree_click(&mut self, node_id: &TreeNodeId) -> bool {
+        let now = Instant::now();
+        let is_double = self
+            .last_tree_click
+            .as_ref()
+            .is_some_and(|(last_id, last_at)| {
+                last_id == node_id && now.duration_since(*last_at) <= Duration::from_millis(350)
+            });
+        self.last_tree_click = Some((node_id.clone(), now));
+        is_double
     }
 
     fn handle_copy_tree_item(&mut self, cx: &mut Context<Self>) {
@@ -702,23 +769,73 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn handle_typeahead_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn handle_typeahead_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         if self.model.search_open {
-            return;
+            return false;
         }
         let modifiers = event.keystroke.modifiers;
         if modifiers.control || modifiers.platform || modifiers.alt {
-            return;
+            return false;
         }
         let key = event.keystroke.key.to_lowercase();
         let key_char = event.keystroke.key_char.as_deref();
         if !self.model.handle_typeahead_key(&key, key_char) {
-            return;
+            return false;
         }
         self.select_typeahead_match(cx);
         if self.model.typeahead_query.is_empty() {
-            cx.notify();
+            self.typeahead_clear_task = None;
+        } else {
+            self.schedule_typeahead_clear(cx);
         }
+        cx.notify();
+        true
+    }
+
+    fn handle_typeahead_keystroke(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+        if self.model.search_open || self.collapsed {
+            return false;
+        }
+        let modifiers = keystroke.modifiers;
+        if modifiers.control || modifiers.platform || modifiers.alt {
+            return false;
+        }
+        let key = keystroke.key.to_lowercase();
+        let key_char = keystroke.key_char.as_deref();
+        if !self.model.handle_typeahead_key(&key, key_char) {
+            return false;
+        }
+        self.select_typeahead_match(cx);
+        if self.model.typeahead_query.is_empty() {
+            self.typeahead_clear_task = None;
+        } else {
+            self.schedule_typeahead_clear(cx);
+        }
+        cx.notify();
+        true
+    }
+
+    fn clear_typeahead(&mut self, cx: &mut Context<Self>) {
+        self.model.typeahead_query.clear();
+        self.model.typeahead_last = None;
+        self.typeahead_clear_task = None;
+        cx.notify();
+    }
+
+    fn schedule_typeahead_clear(&mut self, cx: &mut Context<Self>) {
+        self.typeahead_clear_task = Some(cx.spawn(async |entity, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1100))
+                .await;
+            entity
+                .update(cx, |this, cx| {
+                    this.model.typeahead_query.clear();
+                    this.model.typeahead_last = None;
+                    this.typeahead_clear_task = None;
+                    cx.notify();
+                })
+                .ok();
+        }));
     }
 
     fn select_typeahead_match(&mut self, cx: &mut Context<Self>) {

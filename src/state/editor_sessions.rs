@@ -223,6 +223,10 @@ impl EditorSessionStore {
         self.with_inner(|inner| inner.windows.get(&id).copied()).flatten()
     }
 
+    pub fn all_window_handles(&self) -> Vec<AnyWindowHandle> {
+        self.with_inner(|inner| inner.windows.values().copied().collect()).unwrap_or_default()
+    }
+
     fn with_inner<T>(&self, f: impl FnOnce(&EditorSessionStoreInner) -> T) -> Option<T> {
         let inner = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         Some(f(&inner))

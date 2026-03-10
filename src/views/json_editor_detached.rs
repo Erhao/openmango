@@ -546,7 +546,9 @@ impl Render for DetachedJsonEditorView {
         };
         let notice = self.inline_notice.clone();
         let sync_issue = self.sync_issue;
-        let appearance = self.state.read(cx).settings.appearance.clone();
+        let state_ref = self.state.read(cx);
+        let appearance = state_ref.settings.appearance.clone();
+        let vibrancy = state_ref.startup_vibrancy;
 
         let Some(editor) = self.editor_state.clone() else {
             return div()
@@ -565,6 +567,7 @@ impl Render for DetachedJsonEditorView {
             .flex()
             .flex_col()
             .size_full()
+            .when(vibrancy, |s| s.pt(px(28.0)))
             .bg(islands::content_bg(&appearance, cx))
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(|this, _: &CloseEditorWindow, window, cx| {
@@ -888,11 +891,21 @@ fn open_detached_json_editor_window(
     let bounds =
         Bounds::centered(None, size(px(DETACHED_WINDOW_WIDTH), px(DETACHED_WINDOW_HEIGHT)), cx);
 
+    let vibrancy = state.read(cx).startup_vibrancy;
+
     cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_background: WindowBackgroundAppearance::Opaque,
-            titlebar: Some(TitlebarOptions { title: Some(title), ..Default::default() }),
+            window_background: if vibrancy {
+                WindowBackgroundAppearance::Blurred
+            } else {
+                WindowBackgroundAppearance::Opaque
+            },
+            titlebar: Some(TitlebarOptions {
+                title: Some(title),
+                appears_transparent: vibrancy,
+                ..Default::default()
+            }),
             ..Default::default()
         },
         move |window, cx| {

@@ -95,7 +95,6 @@ impl Sidebar {
                 _ => {}
             }
         }
-        self.handle_typeahead_key(event, cx);
-        false
+        self.handle_typeahead_key(event, cx)
     }
 }

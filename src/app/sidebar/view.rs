@@ -112,6 +112,9 @@ impl Render for Sidebar {
                 this.handle_rename_collection(window, cx);
             }))
             .on_action(cx.listener(|this, _: &DeleteSelection, window, cx| {
+                if !this.model.typeahead_query.is_empty() {
+                    return;
+                }
                 this.handle_delete_selection(window, cx);
             }))
             .on_action(cx.listener(|this, _: &TransferExport, _window, cx| {
@@ -471,7 +474,7 @@ impl Render for Sidebar {
                                                 let selected_db = selected_db.clone();
                                                 let selected_col = selected_col.clone();
                                                 let sidebar_entity = sidebar_entity.clone();
-                                                move |event: &ClickEvent,
+                                                move |_event: &ClickEvent,
                                                       _window: &mut Window,
                                                       cx: &mut App| {
                                                     _window.focus(&row_focus);
@@ -488,8 +491,10 @@ impl Render for Sidebar {
                                                         sidebar_entity.update(cx, |sidebar, cx| {
                                                             sidebar.model.selected_tree_id =
                                                                 Some(node_id.clone());
+                                                            let is_double =
+                                                                sidebar.register_tree_click(&node_id);
                                                             cx.notify();
-                                                            event.click_count() == 2
+                                                            is_double
                                                         });
 
                                                     if is_double_click {
@@ -890,6 +895,46 @@ impl Render for Sidebar {
                                         .text_color(cx.theme().foreground)
                                         .truncate()
                                         .child(label),
+                                ),
+                        )
+                    })
+                    // Typeahead query indicator
+                    .when(!self.model.typeahead_query.is_empty(), |this| {
+                        let query = self.model.typeahead_query.clone();
+                        this.child(
+                            div()
+                                .id("typeahead-indicator")
+                                .absolute()
+                                .bottom(spacing::sm())
+                                .left(spacing::sm())
+                                .right(spacing::sm())
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(spacing::xs())
+                                        .px(spacing::md())
+                                        .py(px(4.0))
+                                        .rounded(borders::radius_md())
+                                        .bg(cx.theme().secondary)
+                                        .border_1()
+                                        .border_color(cx.theme().border)
+                                        .shadow_sm()
+                                        .child(
+                                            Icon::new(IconName::Search)
+                                                .xsmall()
+                                                .text_color(cx.theme().muted_foreground),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_family(crate::theme::fonts::mono())
+                                                .text_color(cx.theme().foreground)
+                                                .child(query),
+                                        ),
                                 ),
                         )
                     }),

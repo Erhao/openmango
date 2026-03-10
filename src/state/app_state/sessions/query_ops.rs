@@ -55,7 +55,6 @@ impl AppState {
     /// Save raw input text without parsing or executing a query.
     /// Used when switching sessions to preserve drafts across tab switches.
     pub fn save_filter_draft(&mut self, session_key: &SessionKey, raw: String) {
-        self.promote_preview_collection_tab(session_key);
         if let Some(session) = self.session_mut(session_key) {
             session.data.filter_raw = raw;
             session.data.explain.mark_stale();
@@ -68,7 +67,6 @@ impl AppState {
         sort_raw: String,
         projection_raw: String,
     ) {
-        self.promote_preview_collection_tab(session_key);
         if let Some(session) = self.session_mut(session_key) {
             session.data.sort_raw = sort_raw;
             session.data.projection_raw = projection_raw;
@@ -158,14 +156,14 @@ mod tests {
     }
 
     #[test]
-    fn save_filter_draft_promotes_preview_tab() {
+    fn save_filter_draft_keeps_preview_tab() {
         let (mut state, key) = preview_state();
 
         state.save_filter_draft(&key, r#"{ "name": "alice" }"#.to_string());
 
-        assert!(state.preview_tab().is_none());
-        assert!(matches!(state.open_tabs(), [TabKey::Collection(tab)] if tab == &key));
-        assert_eq!(state.active_tab(), ActiveTab::Index(0));
+        assert_eq!(state.preview_tab(), Some(&key));
+        assert!(state.open_tabs().is_empty());
+        assert_eq!(state.active_tab(), ActiveTab::Preview);
         assert_eq!(
             state.session_data(&key).map(|session| session.filter_raw.as_str()),
             Some(r#"{ "name": "alice" }"#)

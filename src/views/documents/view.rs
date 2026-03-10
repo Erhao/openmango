@@ -176,6 +176,8 @@ impl Render for CollectionView {
         if self.filter_state.is_none() {
             let filter_state = cx.new(|cx| {
                 let mut state = InputState::new(window, cx)
+                    .code_editor("json")
+                    .multi_line(false)
                     .submit_on_enter(true)
                     .placeholder("find {}")
                     .clean_on_escape();
@@ -188,20 +190,14 @@ impl Render for CollectionView {
                 cx.subscribe_in(&filter_state, window, move |view, state, event, window, cx| {
                     match event {
                         InputEvent::Change => {
+                            if view.syncing_query_inputs {
+                                return;
+                            }
                             if view.filter_auto_pair.try_auto_pair(state, false, window, cx) {
                                 return;
                             }
                             view.filter_auto_pair.sync(state.read(cx).value().as_ref());
                             view.filter_error = false;
-                            if state.read(cx).focus_handle(cx).is_focused(window)
-                                && let Some(session_key) = view.view_model.current_session()
-                            {
-                                view.state.update(cx, |state, cx| {
-                                    if state.promote_preview_collection_tab(&session_key) {
-                                        cx.notify();
-                                    }
-                                });
-                            }
                         }
                         InputEvent::PressEnter { .. } => {
                             let raw = state.read(cx).value().to_string();
@@ -250,6 +246,8 @@ impl Render for CollectionView {
         if self.sort_state.is_none() {
             let sort_state = cx.new(|cx| {
                 let mut state = InputState::new(window, cx)
+                    .code_editor("json")
+                    .multi_line(false)
                     .submit_on_enter(true)
                     .placeholder("sort")
                     .clean_on_escape();
@@ -262,20 +260,14 @@ impl Render for CollectionView {
                 cx.subscribe_in(&sort_state, window, move |view, state, event, window, cx| {
                     match event {
                         InputEvent::Change => {
+                            if view.syncing_query_inputs {
+                                return;
+                            }
                             if view.sort_auto_pair.try_auto_pair(state, false, window, cx) {
                                 return;
                             }
                             view.sort_auto_pair.sync(state.read(cx).value().as_ref());
                             view.sort_error = false;
-                            if state.read(cx).focus_handle(cx).is_focused(window)
-                                && let Some(session_key) = view.view_model.current_session()
-                            {
-                                view.state.update(cx, |state, cx| {
-                                    if state.promote_preview_collection_tab(&session_key) {
-                                        cx.notify();
-                                    }
-                                });
-                            }
                         }
                         InputEvent::PressEnter { .. } => {
                             let raw = state.read(cx).value().to_string();
@@ -326,6 +318,8 @@ impl Render for CollectionView {
         if self.projection_state.is_none() {
             let projection_state = cx.new(|cx| {
                 let mut state = InputState::new(window, cx)
+                    .code_editor("json")
+                    .multi_line(false)
                     .submit_on_enter(true)
                     .placeholder("project {}")
                     .clean_on_escape();
@@ -339,20 +333,14 @@ impl Render for CollectionView {
                 window,
                 move |view, state, event, window, cx| match event {
                     InputEvent::Change => {
+                        if view.syncing_query_inputs {
+                            return;
+                        }
                         if view.projection_auto_pair.try_auto_pair(state, false, window, cx) {
                             return;
                         }
                         view.projection_auto_pair.sync(state.read(cx).value().as_ref());
                         view.projection_error = false;
-                        if state.read(cx).focus_handle(cx).is_focused(window)
-                            && let Some(session_key) = view.view_model.current_session()
-                        {
-                            view.state.update(cx, |state, cx| {
-                                if state.promote_preview_collection_tab(&session_key) {
-                                    cx.notify();
-                                }
-                            });
-                        }
                     }
                     InputEvent::PressEnter { .. } => {
                         let raw = state.read(cx).value().to_string();
@@ -433,10 +421,6 @@ impl Render for CollectionView {
                     let raw = state.read(cx).value().to_string();
                     view.state.update(cx, |state, cx| {
                         state.set_schema_filter(&session_key, raw.clone());
-                        if state.promote_preview_collection_tab(&session_key) {
-                            cx.notify();
-                            return;
-                        }
                         cx.notify();
                     });
                 },
@@ -447,6 +431,7 @@ impl Render for CollectionView {
 
         if self.input_session != session_key {
             self.input_session = session_key.clone();
+            self.syncing_query_inputs = true;
             if let Some(filter_state) = self.filter_state.clone() {
                 let val = if filter_raw.trim().is_empty() {
                     "{}".to_string()
@@ -489,6 +474,7 @@ impl Render for CollectionView {
                 });
                 self.projection_auto_pair.sync(&val);
             }
+            self.syncing_query_inputs = false;
         } else if let Some(filter_state) = self.filter_state.clone() {
             // Sync filter input when filter_raw was changed externally (e.g. AI "Open Collection").
             // Only sync when the input is not focused to avoid overwriting the user's typing.
@@ -497,10 +483,12 @@ impl Render for CollectionView {
             let current = filter_state.read(cx).value().to_string();
             let is_focused = filter_state.read(cx).focus_handle(cx).is_focused(window);
             if !is_focused && current != expected {
+                self.syncing_query_inputs = true;
                 filter_state.update(cx, |state, cx| {
                     state.set_value(expected.clone(), window, cx);
                 });
                 self.filter_auto_pair.sync(&expected);
+                self.syncing_query_inputs = false;
             }
         }
 

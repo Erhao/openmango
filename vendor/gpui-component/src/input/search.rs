@@ -3,23 +3,22 @@ use rust_i18n::t;
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
-    App, AppContext as _, Context, Empty, Entity, FocusHandle, Focusable, Half,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Pixels, Render, Styled,
-    Subscription, Window, actions, canvas, div, prelude::FluentBuilder as _,
+    actions, canvas, div, prelude::FluentBuilder as _, App, AppContext as _, Context, Empty,
+    Entity, FocusHandle, Focusable, Half, InteractiveElement as _, IntoElement, KeyBinding,
+    ParentElement as _, Pixels, Render, Styled, Subscription, Window,
 };
 use ropey::Rope;
 
 use crate::{
-    ActiveTheme, Disableable, IconName, Selectable, Sizable,
     actions::SelectUp,
     button::{Button, ButtonVariants},
     h_flex,
     input::{
-        Enter, Escape, IndentInline, Input, InputEvent, InputState, RopeExt as _, Search,
-        movement::MoveDirection,
+        movement::MoveDirection, Enter, Escape, IndentInline, Input, InputEvent, InputState,
+        RopeExt as _, Search,
     },
     label::Label,
-    v_flex,
+    v_flex, ActiveTheme, Disableable, IconName, Selectable, Sizable,
 };
 
 const CONTEXT: &'static str = "SearchPanel";
@@ -27,11 +26,7 @@ const CONTEXT: &'static str = "SearchPanel";
 actions!(input, [Tab]);
 
 pub(super) fn init(cx: &mut App) {
-    cx.bind_keys(vec![KeyBinding::new(
-        "shift-enter",
-        SelectUp,
-        Some(CONTEXT),
-    )]);
+    cx.bind_keys(vec![KeyBinding::new("shift-enter", SelectUp, Some(CONTEXT))]);
 }
 
 #[derive(Debug, Clone)]
@@ -224,18 +219,20 @@ impl SearchPanel {
         let replace_input = cx.new(|cx| InputState::new(window, cx));
 
         cx.new(|cx| {
-            let _subscriptions =
-                vec![
-                    cx.subscribe(&search_input, |this: &mut Self, _, ev: &InputEvent, cx| {
-                        // Handle search input changes
-                        match ev {
-                            InputEvent::Change => {
-                                this.update_search_query(cx);
-                            }
-                            _ => {}
-                        }
-                    }),
-                ];
+            let _subscriptions = vec![cx.subscribe_in(
+                &search_input,
+                window,
+                |this: &mut Self, _, ev: &InputEvent, window, cx| match ev {
+                    InputEvent::Change => {
+                        this.update_search_query(cx);
+                    }
+                    InputEvent::PressEnter { secondary: false } => {
+                        this.next(window, cx);
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            )];
 
             Self {
                 editor,
@@ -271,19 +268,13 @@ impl SearchPanel {
 
     fn update_search_query(&mut self, cx: &mut Context<Self>) {
         let query = self.search_input.read(cx).value();
-        let visible_range_offset = self
-            .editor
-            .read(cx)
-            .last_layout
-            .as_ref()
-            .map(|l| l.visible_range_offset.clone());
+        let visible_range_offset =
+            self.editor.read(cx).last_layout.as_ref().map(|l| l.visible_range_offset.clone());
 
-        self.matcher
-            .update_query(query.as_str(), self.case_insensitive);
+        self.matcher.update_query(query.as_str(), self.case_insensitive);
 
         if let Some(visible_range_offset) = visible_range_offset {
-            self.matcher
-                .update_cursor_by_offset(visible_range_offset.start);
+            self.matcher.update_cursor_by_offset(visible_range_offset.start);
         }
         cx.notify();
     }
@@ -311,17 +302,23 @@ impl SearchPanel {
     }
 
     fn prev(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let before = self.matcher.current_match_ix;
         if let Some(range) = self.matcher.next_back() {
+            let wrapped = self.matcher.current_match_ix > before;
+            let direction = if wrapped { MoveDirection::Down } else { MoveDirection::Up };
             self.editor.update(cx, |state, cx| {
-                state.scroll_to(range.start, Some(MoveDirection::Up), cx);
+                state.scroll_to(range.start, Some(direction), cx);
             });
         }
     }
 
     fn next(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let before = self.matcher.current_match_ix;
         if let Some(range) = self.matcher.next() {
+            let wrapped = self.matcher.current_match_ix < before;
+            let direction = if wrapped { MoveDirection::Up } else { MoveDirection::Down };
             self.editor.update(cx, |state, cx| {
-                state.scroll_to(range.end, Some(MoveDirection::Down), cx);
+                state.scroll_to(range.end, Some(direction), cx);
             });
         }
     }
@@ -337,11 +334,7 @@ impl SearchPanel {
     fn replace_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let new_text = self.replace_input.read(cx).value();
         self.matcher.replacing = true;
-        if let Some(range) = self
-            .matcher
-            .matched_ranges
-            .get(self.matcher.current_match_ix)
-            .cloned()
+        if let Some(range) = self.matcher.matched_ranges.get(self.matcher.current_match_ix).cloned()
         {
             let text_state = self.editor.clone();
 
@@ -510,22 +503,16 @@ impl Render for SearchPanel {
                     )
                     .child(
                         Label::new(self.matcher.label())
-                            .when(!has_matches, |this| {
-                                this.text_color(cx.theme().muted_foreground)
-                            })
+                            .when(!has_matches, |this| this.text_color(cx.theme().muted_foreground))
                             .text_left()
                             .min_w_16(),
                     )
                     .child(div().w_7())
-                    .child(
-                        Button::new("close")
-                            .xsmall()
-                            .ghost()
-                            .icon(IconName::Close)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.on_action_escape(&Escape, window, cx);
-                            })),
-                    ),
+                    .child(Button::new("close").xsmall().ghost().icon(IconName::Close).on_click(
+                        cx.listener(|this, _, window, cx| {
+                            this.on_action_escape(&Escape, window, cx);
+                        }),
+                    )),
             )
             .when(self.replace_mode, |this| {
                 this.child(

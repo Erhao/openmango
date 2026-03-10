@@ -72,14 +72,20 @@ fn main() {
                 let app_view = cx.new(|cx| AppRoot::new(window, cx));
                 let app_view_for_close = app_view.clone();
 
-                // Flush debounced workspace state, then quit only when the last window closes.
-                window.on_window_should_close(cx, move |_window, cx| {
+                // Flush debounced workspace state and close all sub-windows before quitting.
+                window.on_window_should_close(cx, move |this_window, cx| {
                     app_view_for_close.update(cx, |view, cx| {
                         view.flush_workspace_on_shutdown(cx);
                     });
-                    if cx.windows().len() == 1 {
-                        cx.quit();
+
+                    let this_id = this_window.window_handle();
+                    for w in cx.windows() {
+                        if w != this_id {
+                            w.update(cx, |_, win, _cx| win.remove_window()).ok();
+                        }
                     }
+
+                    cx.quit();
                     true
                 });
 

@@ -58,6 +58,7 @@ pub struct CollectionView {
     pub(crate) aggregation_limit_state: Option<Entity<InputState>>,
     pub(crate) aggregation_results_expanded_nodes: HashSet<String>,
     pub(crate) aggregation_results_signature: Option<u64>,
+    pub(crate) syncing_query_inputs: bool,
     pub(crate) aggregation_ignore_body_change: bool,
     pub(crate) aggregation_stage_body_subscription: Option<Subscription>,
     pub(crate) aggregation_limit_subscription: Option<Subscription>,
@@ -484,6 +485,7 @@ impl CollectionView {
             aggregation_limit_state: None,
             aggregation_results_expanded_nodes: HashSet::new(),
             aggregation_results_signature: None,
+            syncing_query_inputs: false,
             aggregation_ignore_body_change: false,
             aggregation_stage_body_subscription: None,
             aggregation_limit_subscription: None,
@@ -562,13 +564,25 @@ impl CollectionView {
             )
         };
 
-        let next_filter = filter_raw.unwrap_or_else(|| stored_filter.clone());
-        let next_sort = sort_raw.unwrap_or_else(|| stored_sort.clone());
-        let next_projection = projection_raw.unwrap_or_else(|| stored_projection.clone());
+        let normalize_query_draft = |raw: String| {
+            if raw.trim() == "{}" {
+                String::new()
+            } else {
+                raw
+            }
+        };
+
+        let next_filter = normalize_query_draft(filter_raw.unwrap_or_else(|| stored_filter.clone()));
+        let next_sort = normalize_query_draft(sort_raw.unwrap_or_else(|| stored_sort.clone()));
+        let next_projection =
+            normalize_query_draft(projection_raw.unwrap_or_else(|| stored_projection.clone()));
+
+        let stored_filter = normalize_query_draft(stored_filter);
+        let stored_sort = normalize_query_draft(stored_sort);
+        let stored_projection = normalize_query_draft(stored_projection);
 
         let filter_changed = next_filter != stored_filter;
-        let sort_projection_changed =
-            next_sort != stored_sort || next_projection != stored_projection;
+        let sort_projection_changed = next_sort != stored_sort || next_projection != stored_projection;
         if !filter_changed && !sort_projection_changed {
             return;
         }

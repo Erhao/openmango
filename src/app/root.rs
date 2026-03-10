@@ -236,6 +236,22 @@ impl AppRoot {
         let subscription = Self::install_global_shortcuts(cx);
         subscriptions.push(subscription);
 
+        // Global keystroke observer: fallback for CloseTab when dispatch tree
+        // loses track of focus after a tab close (stale FocusId → root_node_id(0)
+        // → no "Workspace" context → keybinding doesn't match).
+        let keystroke_sub = cx.observe_keystrokes(|this, event, window, cx| {
+            let ks = &event.keystroke;
+            let is_close = ks.key == "w"
+                && (ks.modifiers.platform || ks.modifiers.control)
+                && !ks.modifiers.alt
+                && !ks.modifiers.shift;
+            if is_close && event.action.is_none() {
+                this.handle_close_tab(cx);
+                window.focus(&this.focus_handle);
+            }
+        });
+        subscriptions.push(keystroke_sub);
+
         let focus_handle = cx.focus_handle();
 
         Self {
@@ -261,6 +277,13 @@ impl AppRoot {
         self.state.update(cx, |state, _cx| {
             state.flush_workspace_now();
         });
+    }
+
+    pub fn close_all_editor_windows(&self, cx: &mut App) {
+        let sessions = self.state.read(cx).editor_sessions();
+        for handle in sessions.all_window_handles() {
+            handle.update(cx, |_, window, _cx| window.remove_window()).ok();
+        }
     }
 }
 
@@ -331,8 +354,9 @@ impl Render for AppRoot {
             .text_color(cx.theme().foreground)
             .font_family(crate::theme::fonts::ui())
             .line_height(crate::theme::fonts::ui_line_height())
-            .on_action(cx.listener(|this, _: &CloseTab, _window, cx| {
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 this.handle_close_tab(cx);
+                window.focus(&this.focus_handle);
             }))
             .on_action(cx.listener(|this, _: &NextTab, _window, cx| {
                 this.state.update(cx, |state, cx| {

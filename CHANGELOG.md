@@ -16,10 +16,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Column pinning — pin frequently-used columns to the left so they stay visible while scrolling
 
 ### Fixed
+- Search in JSON editors now wraps correctly in both directions — pressing Enter cycles forward through all matches, Shift+Enter cycles backward
+- Detached editor windows now inherit the vibrancy setting from the main window instead of always appearing opaque
+- Closing the main window now also closes all detached editor windows
+- Cmd+W works reliably for successive tab closes — previously only the first press worked, then the shortcut stopped responding
 - Table column order is now deterministic — columns sort alphabetically (_id always first) instead of depending on document key insertion order
 - Table column widths no longer jump around when sorting or paginating — widths lock in on first render
 - Explain modal no longer shows content scrolling behind it — backdrop opacity increased and scroll events are properly blocked
 - Explain modal header is no longer semi-transparent
+- Filter, sort, and projection inputs now have JSON syntax highlighting
+- Sidebar typeahead now works regardless of which node type is selected (previously only worked with databases selected)
+- Typeahead indicator dismisses on Enter (opens selection), Escape, and auto-clears after 1 second of inactivity
+- Backspace deletes characters from the typeahead query
+- Typeahead no longer opens collections during type-ahead — it only highlights; Enter opens
+- Typeahead prefix match now stays on the current selection while the query still matches instead of jumping between similar names
+- Pressing Backspace with the typeahead indicator active no longer triggers the delete confirmation dialog
+- Preview tabs restored — single-clicking a collection opens an italic preview tab that gets replaced on the next click, matching VS Code behavior; previously every click opened a new permanent tab
+- Arrow keys now work in the sidebar tree after clicking a collection (previously stopped responding due to focus loss)
 
 ### Changed
 - Filter bar redesigned — find and sort inputs are now side-by-side in a unified segmented control instead of being hidden behind an "Options" toggle

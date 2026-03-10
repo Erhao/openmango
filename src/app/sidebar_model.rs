@@ -179,16 +179,20 @@ impl SidebarModel {
         if self.entries.is_empty() {
             return None;
         }
-        let start = self
-            .selected_tree_id
-            .as_ref()
-            .and_then(|id| self.entries.iter().position(|entry| &entry.id == id))
-            .map(|ix| ix + 1)
-            .unwrap_or(0);
 
-        for offset in 0..self.entries.len() {
-            let idx = (start + offset) % self.entries.len();
-            let entry = &self.entries[idx];
+        // If the currently selected item still matches, keep it (don't jump).
+        if let Some(cur_id) = &self.selected_tree_id
+            && let Some(cur_ix) = self.entries.iter().position(|e| &e.id == cur_id)
+            && self.entries[cur_ix]
+                .label
+                .to_lowercase()
+                .starts_with(&query)
+        {
+            return Some((cur_ix, cur_id.clone()));
+        }
+
+        // Current selection doesn't match — find the first match from the top.
+        for (idx, entry) in self.entries.iter().enumerate() {
             if entry.label.to_lowercase().starts_with(&query) {
                 self.selected_tree_id = Some(entry.id.clone());
                 return Some((idx, entry.id.clone()));
