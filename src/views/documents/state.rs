@@ -1,4 +1,5 @@
 use gpui::*;
+use gpui_component::calendar::CalendarState;
 use gpui_component::input::InputState;
 use gpui_component::tree::TreeState;
 
@@ -30,6 +31,12 @@ pub struct CollectionView {
     pub(crate) sort_auto_pair: AutoPairState,
     pub(crate) projection_auto_pair: AutoPairState,
     pub(crate) filter_error: bool,
+    pub(crate) calendar_state: Option<Entity<CalendarState>>,
+    pub(crate) calendar_open: bool,
+    pub(crate) calendar_insert_offset: Option<usize>,
+    pub(crate) calendar_hour: Option<Entity<InputState>>,
+    pub(crate) calendar_minute: Option<Entity<InputState>>,
+    pub(crate) calendar_second: Option<Entity<InputState>>,
     pub(crate) sort_error: bool,
     pub(crate) projection_error: bool,
     pub(crate) search_state: Option<Entity<InputState>>,
@@ -457,6 +464,12 @@ impl CollectionView {
             sort_auto_pair: AutoPairState::new("{}"),
             projection_auto_pair: AutoPairState::new("{}"),
             filter_error: false,
+            calendar_state: None,
+            calendar_open: false,
+            calendar_insert_offset: None,
+            calendar_hour: None,
+            calendar_minute: None,
+            calendar_second: None,
             sort_error: false,
             projection_error: false,
             search_state: None,

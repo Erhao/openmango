@@ -2,10 +2,14 @@ use std::rc::Rc;
 
 use crate::state::{CollectionStats, CollectionSubview, SchemaAnalysis, SessionKey};
 use crate::theme::spacing;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::ActiveTheme as _;
 use gpui_component::RopeExt as _;
-use gpui_component::input::{InputEvent, InputState};
+use gpui_component::Sizable as _;
+use gpui_component::calendar::{Calendar, CalendarEvent, CalendarState, Date};
+use gpui_component::h_flex;
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement;
 
 use super::CollectionView;
@@ -13,6 +17,45 @@ use super::header::render_stats_row;
 use super::query::is_valid_query;
 use super::query_completion::QueryCompletionProvider;
 use super::schema_filter_completion::SchemaFilterCompletionProvider;
+
+fn parse_time_part(val: &str, max: u32) -> u32 {
+    val.trim().parse::<u32>().unwrap_or(0).min(max)
+}
+
+fn subscribe_time_input(
+    cx: &mut Context<'_, CollectionView>,
+    window: &mut Window,
+    state: &Entity<InputState>,
+    max: u32,
+) -> Subscription {
+    cx.subscribe_in(
+        state,
+        window,
+        move |_view, state, event: &InputEvent, window, cx| match event {
+            InputEvent::Change => {
+                let val = state.read(cx).value().to_string();
+                let digits: String = val.chars().filter(|c| c.is_ascii_digit()).take(2).collect();
+                if digits != val {
+                    state.update(cx, |input, cx| {
+                        input.set_value(digits, window, cx);
+                    });
+                }
+            }
+            InputEvent::Blur => {
+                let val = state.read(cx).value().to_string();
+                if !val.is_empty() {
+                    let clamped = format!("{:02}", parse_time_part(&val, max));
+                    if clamped != val {
+                        state.update(cx, |input, cx| {
+                            input.set_value(clamped, window, cx);
+                        });
+                    }
+                }
+            }
+            _ => {}
+        },
+    )
+}
 
 fn set_query_object_default(
     input: &mut InputState,
@@ -198,6 +241,39 @@ impl Render for CollectionView {
                             }
                             view.filter_auto_pair.sync(state.read(cx).value().as_ref());
                             view.filter_error = false;
+
+                            // Detect ISODate("") or Date("") pattern for calendar popup.
+                            let (text, cursor) = {
+                                let input = state.read(cx);
+                                (input.value().to_string(), input.cursor())
+                            };
+                            let show_calendar = cursor <= text.len()
+                                && (text[..cursor].ends_with("ISODate(\"")
+                                    || text[..cursor].ends_with("Date(\""))
+                                && text[cursor..].starts_with("\")");
+                            if show_calendar {
+                                view.calendar_insert_offset = Some(cursor);
+                                if !view.calendar_open {
+                                    view.calendar_open = true;
+                                    for s in [
+                                        &view.calendar_hour,
+                                        &view.calendar_minute,
+                                        &view.calendar_second,
+                                    ]
+                                    .into_iter()
+                                    .flatten()
+                                    {
+                                        s.update(cx, |input, cx| {
+                                            input.set_value(String::new(), window, cx);
+                                        });
+                                    }
+                                    cx.notify();
+                                }
+                            } else if view.calendar_open {
+                                view.calendar_open = false;
+                                view.calendar_insert_offset = None;
+                                cx.notify();
+                            }
                         }
                         InputEvent::PressEnter { .. } => {
                             let raw = state.read(cx).value().to_string();
@@ -239,8 +315,64 @@ impl Render for CollectionView {
                         }
                     }
                 });
+            let calendar_state = cx.new(|cx| CalendarState::new(window, cx));
+            let hour_state = cx.new(|cx| InputState::new(window, cx).placeholder("HH"));
+            let minute_state = cx.new(|cx| InputState::new(window, cx).placeholder("MM"));
+            let second_state = cx.new(|cx| InputState::new(window, cx).placeholder("SS"));
+            self._subscriptions.push(subscribe_time_input(cx, window, &hour_state, 23));
+            self._subscriptions.push(subscribe_time_input(cx, window, &minute_state, 59));
+            self._subscriptions.push(subscribe_time_input(cx, window, &second_state, 59));
+            let filter_for_calendar = filter_state.clone();
+            let hour_for_calendar = hour_state.clone();
+            let minute_for_calendar = minute_state.clone();
+            let second_for_calendar = second_state.clone();
+            let calendar_subscription = cx.subscribe_in(
+                &calendar_state,
+                window,
+                move |view: &mut CollectionView, _calendar, event: &CalendarEvent, _window, cx| {
+                    let CalendarEvent::Selected(date) = event;
+                    if let Date::Single(Some(naive_date)) = date
+                        && let Some(offset) = view.calendar_insert_offset
+                    {
+                        let h = parse_time_part(&hour_for_calendar.read(cx).value(), 23);
+                        let m = parse_time_part(&minute_for_calendar.read(cx).value(), 59);
+                        let s = parse_time_part(&second_for_calendar.read(cx).value(), 59);
+                        let formatted = format!(
+                            "{}T{:02}:{:02}:{:02}.000Z",
+                            naive_date.format("%Y-%m-%d"),
+                            h,
+                            m,
+                            s,
+                        );
+                        let insert_offset = offset;
+                        filter_for_calendar.update(cx, |input, cx| {
+                            let text = input.value().to_string();
+                            if insert_offset <= text.len() {
+                                let mut new_text =
+                                    String::with_capacity(text.len() + formatted.len());
+                                new_text.push_str(&text[..insert_offset]);
+                                new_text.push_str(&formatted);
+                                new_text.push_str(&text[insert_offset..]);
+                                input.set_value(new_text, _window, cx);
+                                let position = input
+                                    .text()
+                                    .offset_to_position(insert_offset + formatted.len());
+                                input.set_cursor_position(position, _window, cx);
+                            }
+                        });
+                    }
+                    view.calendar_open = false;
+                    view.calendar_insert_offset = None;
+                    cx.notify();
+                },
+            );
             self.filter_state = Some(filter_state);
             self.filter_subscription = Some(subscription);
+            self.calendar_state = Some(calendar_state);
+            self.calendar_hour = Some(hour_state);
+            self.calendar_minute = Some(minute_state);
+            self.calendar_second = Some(second_state);
+            self._subscriptions.push(calendar_subscription);
         }
 
         if self.sort_state.is_none() {
@@ -482,7 +614,7 @@ impl Render for CollectionView {
                 if filter_raw.trim().is_empty() { "{}".to_string() } else { filter_raw.clone() };
             let current = filter_state.read(cx).value().to_string();
             let is_focused = filter_state.read(cx).focus_handle(cx).is_focused(window);
-            if !is_focused && current != expected {
+            if !is_focused && !self.calendar_open && current != expected {
                 self.syncing_query_inputs = true;
                 filter_state.update(cx, |state, cx| {
                     state.set_value(expected.clone(), window, cx);
@@ -530,35 +662,103 @@ impl Render for CollectionView {
 
         let mut root = div().key_context(key_context.as_str());
         root = self.bind_root_actions(root, cx);
+        let view_entity = cx.entity();
         root = root.flex().flex_col().flex_1().h_full().bg(cx.theme().background).child(
-            self.render_header(
-                &collection_name,
-                &db_name,
-                total,
-                session_key.clone(),
-                selected_doc,
-                selected_count,
-                any_selected_dirty,
-                is_loading,
-                filter_state,
-                filter_valid,
-                filter_active,
-                sort_state,
-                projection_state,
-                sort_valid,
-                projection_valid,
-                sort_active,
-                projection_active,
-                query_options_open,
-                subview,
-                stats_loading,
-                aggregation.loading,
-                explain.loading,
-                schema_loading,
-                col_visibility_search,
-                window,
-                cx,
-            ),
+            div()
+                .relative()
+                .child(self.render_header(
+                    &collection_name,
+                    &db_name,
+                    total,
+                    session_key.clone(),
+                    selected_doc,
+                    selected_count,
+                    any_selected_dirty,
+                    is_loading,
+                    filter_state,
+                    filter_valid,
+                    filter_active,
+                    sort_state,
+                    projection_state,
+                    sort_valid,
+                    projection_valid,
+                    sort_active,
+                    projection_active,
+                    query_options_open,
+                    subview,
+                    stats_loading,
+                    aggregation.loading,
+                    explain.loading,
+                    schema_loading,
+                    col_visibility_search,
+                    window,
+                    cx,
+                ))
+                .when_some(
+                    self.calendar_open.then_some(self.calendar_state.clone()).flatten(),
+                    |this, calendar_state| {
+                        let border = cx.theme().border;
+                        let popover_bg = cx.theme().popover;
+                        let popover_fg = cx.theme().popover_foreground;
+                        let muted_fg = cx.theme().muted_foreground;
+                        let hour = self.calendar_hour.clone();
+                        let minute = self.calendar_minute.clone();
+                        let second = self.calendar_second.clone();
+                        this.child(
+                            deferred(
+                                anchored().snap_to_window_with_margin(px(8.)).child(
+                                    div()
+                                        .occlude()
+                                        .mt_1p5()
+                                        .p_3()
+                                        .border_1()
+                                        .border_color(border)
+                                        .shadow_lg()
+                                        .rounded(px(8.))
+                                        .bg(popover_bg)
+                                        .text_color(popover_fg)
+                                        .on_mouse_up_out(MouseButton::Left, {
+                                            let view_entity = view_entity.clone();
+                                            move |_, _, cx| {
+                                                view_entity.update(cx, |view, cx| {
+                                                    view.calendar_open = false;
+                                                    view.calendar_insert_offset = None;
+                                                    cx.notify();
+                                                });
+                                            }
+                                        })
+                                        .child(Calendar::new(&calendar_state).number_of_months(1))
+                                        .child(
+                                            h_flex()
+                                                .mt_2()
+                                                .pt_2()
+                                                .border_t_1()
+                                                .border_color(border)
+                                                .items_center()
+                                                .justify_center()
+                                                .gap_1()
+                                                .when_some(hour, |this, h| {
+                                                    this.child(Input::new(&h).small().w(px(42.)))
+                                                })
+                                                .child(
+                                                    div().text_color(muted_fg).text_sm().child(":"),
+                                                )
+                                                .when_some(minute, |this, m| {
+                                                    this.child(Input::new(&m).small().w(px(42.)))
+                                                })
+                                                .child(
+                                                    div().text_color(muted_fg).text_sm().child(":"),
+                                                )
+                                                .when_some(second, |this, s| {
+                                                    this.child(Input::new(&s).small().w(px(42.)))
+                                                }),
+                                        ),
+                                ),
+                            )
+                            .with_priority(2),
+                        )
+                    },
+                ),
         );
 
         let content = match subview {

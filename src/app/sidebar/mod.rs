@@ -177,6 +177,9 @@ impl Sidebar {
             if event.action.is_some() {
                 return;
             }
+            if !this.focus_handle.contains_focused(window, cx) {
+                return;
+            }
             if this.focus_handle.is_focused(window) {
                 return;
             }

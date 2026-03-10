@@ -15,6 +15,22 @@ struct Operator {
     detail: &'static str,
 }
 
+const BSON_CONSTRUCTORS: &[Operator] = &[
+    Operator { label: "ObjectId", snippet: "ObjectId(\"$1\")$0", detail: "MongoDB ObjectId" },
+    Operator { label: "ISODate", snippet: "ISODate(\"$1\")$0", detail: "ISO 8601 date" },
+    Operator { label: "Date", snippet: "Date(\"$1\")$0", detail: "Date (alias for ISODate)" },
+    Operator { label: "NumberLong", snippet: "NumberLong($1)$0", detail: "64-bit integer" },
+    Operator { label: "NumberInt", snippet: "NumberInt($1)$0", detail: "32-bit integer" },
+    Operator {
+        label: "NumberDecimal",
+        snippet: "NumberDecimal(\"$1\")$0",
+        detail: "128-bit decimal",
+    },
+    Operator { label: "NumberDouble", snippet: "NumberDouble($1)$0", detail: "64-bit float" },
+    Operator { label: "UUID", snippet: "UUID(\"$1\")$0", detail: "UUID value" },
+    Operator { label: "Timestamp", snippet: "Timestamp($1, $2)$0", detail: "BSON Timestamp(t, i)" },
+];
+
 const OPERATORS: &[Operator] = &[
     Operator { label: "$gt", snippet: "$gt: $0", detail: "Greater than" },
     Operator { label: "$gte", snippet: "$gte: $0", detail: "Greater than or equal" },
@@ -129,6 +145,30 @@ impl CompletionProvider for QueryCompletionProvider {
                     ..Default::default()
                 }
             }));
+
+            // BSON type constructor completions (case-insensitive prefix match)
+            if !token.is_empty() {
+                let token_lower = token.to_ascii_lowercase();
+                items.extend(
+                    BSON_CONSTRUCTORS
+                        .iter()
+                        .filter(|c| c.label.to_ascii_lowercase().starts_with(&token_lower))
+                        .map(|c| CompletionItem {
+                            label: c.label.to_string(),
+                            kind: Some(CompletionItemKind::CONSTRUCTOR),
+                            detail: Some(c.detail.to_string()),
+                            insert_text_format: Some(InsertTextFormat::SNIPPET),
+                            text_edit: Some(CompletionTextEdit::InsertAndReplace(
+                                InsertReplaceEdit {
+                                    new_text: c.snippet.to_string(),
+                                    insert: replace_range,
+                                    replace: replace_range,
+                                },
+                            )),
+                            ..Default::default()
+                        }),
+                );
+            }
         }
 
         Task::ready(Ok(CompletionResponse::Array(items)))
