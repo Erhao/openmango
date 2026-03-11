@@ -167,6 +167,8 @@ impl CollectionView {
                 projection_active,
                 query_options_open,
                 explain_loading,
+                self.filter_error_message.as_deref(),
+                self.filter_dirty,
                 cx,
             ));
 

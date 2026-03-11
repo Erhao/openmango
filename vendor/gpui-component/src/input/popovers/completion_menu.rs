@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use gpui::{
-    Action, AnchoredPositionMode, AnyElement, App, AppContext, Bounds, Context, DismissEvent,
-    Empty, Entity, EventEmitter, HighlightStyle, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Point, Render, RenderOnce, SharedString, Styled, StyledText,
-    Subscription, Window, anchored, canvas, deferred, div, prelude::FluentBuilder, px, relative,
+    anchored, canvas, deferred, div, prelude::FluentBuilder, px, relative, Action, AnyElement, App,
+    AppContext, Bounds, Context, DismissEvent, Empty, Entity, EventEmitter, HighlightStyle,
+    InteractiveElement as _, IntoElement, ParentElement, Pixels, Point, Render, RenderOnce,
+    SharedString, Styled, StyledText, Subscription, Window,
 };
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionTextEdit, InsertTextFormat};
 
@@ -78,13 +78,15 @@ fn expand_snippet(snippet: &str) -> (String, Option<usize>) {
 }
 
 use crate::{
-    ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable as _, actions, h_flex,
+    actions, h_flex,
     input::{
-        self, InputState, RopeExt,
+        self,
         popovers::{editor_popover, render_markdown},
+        InputState, RopeExt,
     },
     label::Label,
     list::{List, ListDelegate, ListEvent, ListState},
+    ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable as _,
 };
 
 struct ContextMenuDelegate {
@@ -116,13 +118,7 @@ struct CompletionMenuItem {
 
 impl CompletionMenuItem {
     fn new(ix: usize, item: Rc<CompletionItem>) -> Self {
-        Self {
-            ix,
-            item,
-            children: vec![],
-            selected: false,
-            highlight_prefix: "".into(),
-        }
+        Self { ix, item, children: vec![], selected: false, highlight_prefix: "".into() }
     }
 
     fn highlight_prefix(mut self, s: impl Into<SharedString>) -> Self {
@@ -204,17 +200,10 @@ impl RenderOnce for CompletionMenuItem {
 
         let highlights = vec![(
             0..matched_len,
-            HighlightStyle {
-                color: Some(cx.theme().blue),
-                ..Default::default()
-            },
+            HighlightStyle { color: Some(cx.theme().blue), ..Default::default() },
         )];
 
-        let detail = item
-            .detail
-            .as_deref()
-            .or_else(|| Self::kind_label(item.kind))
-            .unwrap_or("");
+        let detail = item.detail.as_deref().or_else(|| Self::kind_label(item.kind)).unwrap_or("");
 
         h_flex()
             .id(self.ix)
@@ -228,8 +217,7 @@ impl RenderOnce for CompletionMenuItem {
             .when(deprecated, |this| this.line_through())
             .hover(|this| this.bg(cx.theme().accent.opacity(0.8)))
             .when(self.selected, |this| {
-                this.bg(cx.theme().accent)
-                    .text_color(cx.theme().accent_foreground)
+                this.bg(cx.theme().accent).text_color(cx.theme().accent_foreground)
             })
             .child(
                 h_flex()
@@ -339,17 +327,15 @@ impl CompletionMenu {
             let list = cx.new(|cx| ListState::new(menu, window, cx));
 
             let _subscriptions =
-                vec![
-                    cx.subscribe(&list, |this: &mut Self, _, ev: &ListEvent, cx| {
-                        match ev {
-                            ListEvent::Confirm(_) => {
-                                this.hide(cx);
-                            }
-                            _ => {}
+                vec![cx.subscribe(&list, |this: &mut Self, _, ev: &ListEvent, cx| {
+                    match ev {
+                        ListEvent::Confirm(_) => {
+                            this.hide(cx);
                         }
-                        cx.notify();
-                    }),
-                ];
+                        _ => {}
+                    }
+                    cx.notify();
+                })];
 
             Self {
                 offset: 0,
@@ -463,15 +449,12 @@ impl CompletionMenu {
     }
 
     fn on_action_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |this, cx| {
-            this.on_action_select_prev(&actions::SelectUp, window, cx)
-        });
+        self.list.update(cx, |this, cx| this.on_action_select_prev(&actions::SelectUp, window, cx));
     }
 
     fn on_action_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |this, cx| {
-            this.on_action_select_next(&actions::SelectDown, window, cx)
-        });
+        self.list
+            .update(cx, |this, cx| this.on_action_select_next(&actions::SelectDown, window, cx));
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -567,20 +550,28 @@ impl Render for CompletionMenu {
         let viewport_size = window.viewport_size();
         let abs_pos = self.editor.read(cx).input_bounds.origin + pos;
         let prefer_above = abs_pos.y > (viewport_size.height * 0.6);
-        let anchor_corner = if prefer_above {
-            gpui::Corner::BottomLeft
+
+        let line_height =
+            self.editor.read(cx).last_layout.as_ref().map(|l| l.line_height).unwrap_or(px(20.));
+
+        let (anchor_corner, anchor_pos) = if prefer_above {
+            // abs_pos.y includes (line_height + POPOVER_GAP) downward from origin();
+            // reverse that offset and add a gap to place the dropdown above the cursor.
+            let above_y = abs_pos.y - line_height - POPOVER_GAP * 2.;
+            (gpui::Corner::BottomLeft, Point::new(abs_pos.x, above_y))
         } else {
-            gpui::Corner::TopLeft
+            (gpui::Corner::TopLeft, abs_pos)
         };
+
         let max_width = MAX_MENU_WIDTH.min((viewport_size.width - px(16.)).max(px(200.)));
         let vertical_layout =
             viewport_size.width < (MAX_MENU_WIDTH + POPOVER_GAP + MAX_MENU_WIDTH + px(24.));
 
         deferred(
             anchored()
-                .position_mode(AnchoredPositionMode::Local)
+                .snap_to_window_with_margin(px(8.))
                 .anchor(anchor_corner)
-                .position(pos)
+                .position(anchor_pos)
                 .child(
                     div()
                         .flex()
@@ -595,7 +586,9 @@ impl Render for CompletionMenu {
                                 .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT))
                                 .child(
                                     canvas(
-                                        move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds),
+                                        move |bounds, _, cx| {
+                                            view.update(cx, |r, _| r.bounds = bounds)
+                                        },
                                         |_, _, _, _| {},
                                     )
                                     .absolute()

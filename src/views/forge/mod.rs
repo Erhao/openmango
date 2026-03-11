@@ -8,10 +8,10 @@ mod completion;
 mod controller;
 mod editor;
 pub(crate) mod editor_behavior;
-mod logic;
+pub(crate) mod logic;
 mod mongosh;
 mod output;
-mod parser;
+pub(crate) mod parser;
 mod runtime;
 mod state;
 mod types;
@@ -326,7 +326,6 @@ impl Render for ForgeView {
                 .px(spacing::md())
                 .pt(spacing::sm())
                 .pb(px(6.0))
-                .child(self.render_header(cx))
                 .child(
                     div()
                         .relative()

@@ -36,52 +36,77 @@ pub fn render_filter_row(
     projection_active: bool,
     query_options_open: bool,
     explain_loading: bool,
+    filter_error_message: Option<&str>,
+    filter_dirty: bool,
     cx: &App,
 ) -> Div {
     let state_for_filter = state.clone();
     let state_for_clear = state.clone();
     let state_for_toggle = state.clone();
     let disabled = session_key.is_none();
-    let segmented_border = cx.theme().sidebar_border.opacity(0.5);
+    let segmented_border = if filter_active {
+        cx.theme().primary.opacity(0.45)
+    } else {
+        cx.theme().sidebar_border.opacity(0.5)
+    };
 
-    div()
-        .flex()
-        .items_center()
-        .gap(spacing::xs())
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .flex_1()
-                .min_w(px(360.0))
-                .rounded(borders::radius_md())
-                .border_1()
-                .border_color(segmented_border)
-                .bg(cx.theme().secondary.opacity(0.14))
-                .child(render_query_segment(
+    let mut col = div().flex().flex_col().gap(px(4.0));
+
+    col = col.child(
+        div()
+            .flex()
+            .items_center()
+            .gap(spacing::xs())
+            .child({
+                let mut bar = div()
+                    .flex()
+                    .items_center()
+                    .flex_1()
+                    .min_w(px(360.0))
+                    .rounded(borders::radius_md())
+                    .border_1()
+                    .border_color(segmented_border)
+                    .bg(cx.theme().secondary.opacity(0.14));
+
+                if filter_active {
+                    bar = bar.border_l_2().border_color(cx.theme().primary.opacity(0.65));
+                }
+
+                bar.child(render_query_segment(
                     "query-segment-find",
                     IconName::Search,
                     filter_state.clone(),
                     "find {}",
                     filter_valid,
+                    filter_active,
                     disabled,
                     cx,
                 ))
-                .child(div().w(px(1.0)).h(px(16.0)).bg(segmented_border.opacity(0.65)))
+                .child(div().w(px(1.0)).h(px(16.0)).bg(cx.theme().sidebar_border.opacity(0.32)))
                 .child(render_query_segment(
                     "query-segment-sort",
                     IconName::SortAscending,
                     sort_state.clone(),
                     "sort",
                     sort_valid,
+                    false,
                     disabled,
                     cx,
-                )),
-        )
-        .child(
-            filter_action_button(Button::new("apply-filter").compact(), IconName::Search, "Run")
-                .disabled(session_key.is_none() || !filter_valid)
-                .on_click({
+                ))
+            })
+            .child({
+                let mut run_btn = filter_action_button(
+                    Button::new("apply-filter").compact(),
+                    IconName::Search,
+                    "Run",
+                )
+                .disabled(session_key.is_none() || !filter_valid);
+
+                if filter_dirty && filter_valid {
+                    run_btn = run_btn.active_style(cx.theme().primary.opacity(0.55));
+                }
+
+                run_btn.on_click({
                     let session_key = session_key.clone();
                     let filter_state = filter_state.clone();
                     let state_for_filter = state_for_filter.clone();
@@ -100,10 +125,14 @@ pub fn render_filter_row(
                             cx,
                         );
                     }
-                }),
-        )
-        .child(
-            filter_action_button(Button::new("run-explain").compact(), IconName::Info, "Explain")
+                })
+            })
+            .child(
+                filter_action_button(
+                    Button::new("run-explain").compact(),
+                    IconName::Info,
+                    "Explain",
+                )
                 .disabled(session_key.is_none() || explain_loading)
                 .on_click({
                     let session_key = session_key.clone();
@@ -115,63 +144,80 @@ pub fn render_filter_row(
                         AppCommands::run_explain_for_session(state.clone(), session_key, cx);
                     }
                 }),
-        )
-        .child(
-            filter_action_button(
-                Button::new("clear-filter").compact(),
-                IconName::Close,
-                "Clear Find",
             )
-            .disabled(session_key.is_none() || !filter_active)
-            .on_click({
-                let session_key = session_key.clone();
-                let filter_state = filter_state.clone();
-                let state_for_clear = state_for_clear.clone();
-                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let Some(session_key) = session_key.clone() else {
-                        return;
-                    };
-                    let Some(filter_state) = filter_state.clone() else {
-                        return;
-                    };
-                    filter_state.update(cx, |state, cx| {
-                        set_query_object_default(state, window, cx);
-                    });
-                    CollectionView::apply_filter(
-                        state_for_clear.clone(),
-                        session_key,
-                        filter_state,
-                        window,
-                        cx,
-                    );
-                }
-            }),
-        )
-        .child({
-            let mut options_button = Button::new("toggle-options")
-                .ghost()
-                .compact()
-                .icon(Icon::new(IconName::Settings).xsmall())
-                .tooltip("Projection options")
-                .disabled(session_key.is_none())
+            .child(
+                filter_action_button(
+                    Button::new("clear-filter").compact(),
+                    IconName::Close,
+                    "Clear Find",
+                )
+                .disabled(session_key.is_none() || !filter_active)
                 .on_click({
                     let session_key = session_key.clone();
-                    let state_for_toggle = state_for_toggle.clone();
-                    move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
+                    let filter_state = filter_state.clone();
+                    let state_for_clear = state_for_clear.clone();
+                    move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
                         let Some(session_key) = session_key.clone() else {
                             return;
                         };
-                        state_for_toggle.update(cx, |state, cx| {
-                            state.toggle_query_options_open(&session_key);
-                            cx.notify();
+                        let Some(filter_state) = filter_state.clone() else {
+                            return;
+                        };
+                        filter_state.update(cx, |state, cx| {
+                            state.set_value(String::new(), window, cx);
                         });
+                        CollectionView::apply_filter(
+                            state_for_clear.clone(),
+                            session_key,
+                            filter_state,
+                            window,
+                            cx,
+                        );
                     }
-                });
-            if query_options_open || sort_active || projection_active {
-                options_button = options_button.active_style(cx.theme().secondary);
-            }
-            options_button
-        })
+                }),
+            )
+            .child({
+                let mut options_button = Button::new("toggle-options")
+                    .ghost()
+                    .compact()
+                    .icon(Icon::new(IconName::Settings).xsmall())
+                    .tooltip("Projection options")
+                    .disabled(session_key.is_none())
+                    .on_click({
+                        let session_key = session_key.clone();
+                        let state_for_toggle = state_for_toggle.clone();
+                        move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
+                            let Some(session_key) = session_key.clone() else {
+                                return;
+                            };
+                            state_for_toggle.update(cx, |state, cx| {
+                                state.toggle_query_options_open(&session_key);
+                                cx.notify();
+                            });
+                        }
+                    });
+                if query_options_open || sort_active || projection_active {
+                    options_button = options_button.active_style(cx.theme().secondary);
+                }
+                options_button
+            }),
+    );
+
+    if let Some(err) = filter_error_message {
+        col = col.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(spacing::xs())
+                .px(spacing::sm())
+                .child(Icon::new(IconName::CircleX).size(px(12.0)).text_color(cx.theme().danger))
+                .child(
+                    div().text_xs().text_color(cx.theme().danger).truncate().child(err.to_string()),
+                ),
+        );
+    }
+
+    col
 }
 
 fn render_query_segment(
@@ -180,9 +226,18 @@ fn render_query_segment(
     state: Option<Entity<InputState>>,
     placeholder: &'static str,
     valid: bool,
+    active: bool,
     disabled: bool,
     cx: &App,
 ) -> impl IntoElement {
+    let icon_color = if !valid {
+        cx.theme().danger
+    } else if active {
+        cx.theme().primary
+    } else {
+        cx.theme().muted_foreground
+    };
+
     let mut row = div()
         .id(id)
         .flex()
@@ -194,7 +249,7 @@ fn render_query_segment(
         .py(px(2.0))
         .text_color(if valid { cx.theme().muted_foreground } else { cx.theme().danger })
         .when(!valid, |s| s.bg(cx.theme().danger.opacity(0.08)))
-        .child(Icon::new(icon).xsmall())
+        .child(Icon::new(icon).xsmall().text_color(icon_color))
         .on_mouse_down(MouseButton::Left, |_, _window, cx| {
             cx.stop_propagation();
         });
@@ -255,6 +310,7 @@ pub fn render_query_options(
                     projection_state.clone(),
                     "project {}",
                     projection_valid,
+                    projection_active,
                     disabled,
                     cx,
                 )),

@@ -1,8 +1,9 @@
 use gpui::*;
 use gpui_component::input::InputState;
+use mongodb::bson::Bson;
 use mongodb::bson::Document;
 
-use crate::bson::parse_document_from_json;
+use crate::bson::{format_relaxed_json_compact, parse_document_from_json};
 use crate::state::{AppCommands, AppState, SessionKey, StatusMessage};
 
 use super::CollectionView;
@@ -16,7 +17,7 @@ impl CollectionView {
         cx: &mut App,
     ) {
         let raw = filter_state.read(cx).value().to_string();
-        let trimmed = raw.trim();
+        let trimmed = normalized_filter_query(&raw);
 
         if trimmed.is_empty() || trimmed == "{}" {
             state.update(cx, |state, cx| {
@@ -28,10 +29,10 @@ impl CollectionView {
             return;
         }
 
-        match parse_document_from_json(trimmed) {
+        match parse_document_from_json(&trimmed) {
             Ok(filter) => {
                 state.update(cx, |state, cx| {
-                    state.set_filter(&session_key, trimmed.to_string(), Some(filter));
+                    state.set_filter(&session_key, trimmed.clone(), Some(filter));
                     state.set_status_message(Some(StatusMessage::info("Filter applied")));
                     cx.notify();
                 });
@@ -106,30 +107,69 @@ impl CollectionView {
     }
 }
 
-/// Check if a query string is valid (empty, `{}`, or parseable as a document).
-pub(super) fn is_valid_query(raw: &str) -> bool {
+pub(super) fn normalized_filter_query(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "{}".to_string();
+    }
+    if trimmed.starts_with('{') {
+        return trimmed.to_string();
+    }
+    format!("{{{trimmed}}}")
+}
+
+pub(super) fn format_filter_query(raw: &str) -> Result<String, String> {
+    let normalized = normalized_filter_query(raw);
+    let doc = parse_document_from_json(&normalized)?;
+    let value = Bson::Document(doc).into_relaxed_extjson();
+    Ok(format_relaxed_json_compact(&value))
+}
+
+/// Return a user-facing validation error for a query string, if any.
+pub(super) fn query_validation_error(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "{}" {
-        return true;
+        return None;
     }
-    parse_document_from_json(trimmed).is_ok()
+
+    parse_document_from_json(trimmed).err().map(|err| err.to_string())
+}
+
+pub(super) fn filter_query_validation_error(raw: &str) -> Option<String> {
+    let trimmed = normalized_filter_query(raw);
+    if trimmed == "{}" {
+        return None;
+    }
+    parse_document_from_json(&trimmed).err().map(|err| err.to_string())
+}
+
+/// Check if a query string is valid (empty, `{}`, or parseable as a document).
+pub(super) fn is_valid_query(raw: &str) -> bool {
+    query_validation_error(raw).is_none()
+}
+
+pub(super) fn optional_query_validation_error(raw: &str) -> Option<String> {
+    query_validation_error(raw)
 }
 
 fn parse_optional_doc(raw: &str) -> Result<(String, Option<Document>), String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed == "{}" {
-        return Ok((String::new(), None));
-    }
-
-    match parse_document_from_json(trimmed) {
-        Ok(doc) => Ok((trimmed.to_string(), Some(doc))),
-        Err(err) => Err(err.to_string()),
+    match optional_query_validation_error(trimmed) {
+        None if trimmed.is_empty() || trimmed == "{}" => Ok((String::new(), None)),
+        None => parse_document_from_json(trimmed)
+            .map(|doc| (trimmed.to_string(), Some(doc)))
+            .map_err(|err| err.to_string()),
+        Some(err) => Err(err),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_query, parse_optional_doc};
+    use super::{
+        filter_query_validation_error, format_filter_query, is_valid_query,
+        normalized_filter_query, optional_query_validation_error, parse_optional_doc,
+        query_validation_error,
+    };
 
     #[test]
     fn is_valid_query_accepts_empty_and_braces() {
@@ -155,5 +195,36 @@ mod tests {
         let (raw, doc) = parse_optional_doc("  {\"x\": 1}  ").expect("document query should parse");
         assert_eq!(raw, "{\"x\": 1}");
         assert!(doc.is_some());
+    }
+
+    #[test]
+    fn query_validation_error_reports_invalid_query() {
+        let err = query_validation_error("{\"x\":").expect("invalid query should return an error");
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn optional_query_validation_error_accepts_empty_queries() {
+        assert!(optional_query_validation_error("").is_none());
+        assert!(optional_query_validation_error(" {} ").is_none());
+    }
+
+    #[test]
+    fn normalized_filter_query_wraps_missing_braces() {
+        assert_eq!(normalized_filter_query("name: \"alice\""), "{name: \"alice\"}");
+        assert_eq!(normalized_filter_query(""), "{}");
+    }
+
+    #[test]
+    fn filter_query_validation_accepts_missing_outer_braces() {
+        assert!(filter_query_validation_error("name: \"alice\"").is_none());
+    }
+
+    #[test]
+    fn format_filter_query_wraps_and_formats() {
+        assert_eq!(
+            format_filter_query("name:\"alice\",age:1").expect("format"),
+            "{name: \"alice\", age: 1}"
+        );
     }
 }
