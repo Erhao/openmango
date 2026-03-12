@@ -1,14 +1,14 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Colorize as _, Disableable, FocusableExt as _, Icon, IconName, Selectable,
-    Sizable, Size, StyleSized, StyledExt, h_flex, spinner::Spinner, tooltip::Tooltip,
+    h_flex, spinner::Spinner, tooltip::Tooltip, ActiveTheme, Colorize as _, Disableable,
+    FocusableExt as _, Icon, IconName, Selectable, Sizable, Size, StyleSized, StyledExt,
 };
 use gpui::{
-    Action, AnyElement, App, ClickEvent, Corners, Div, Edges, ElementId, Hsla, InteractiveElement,
-    Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, SharedString,
-    Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _, px, relative,
+    div, prelude::FluentBuilder as _, px, relative, Action, AnyElement, App, ClickEvent, Corners,
+    Div, Edges, ElementId, Hsla, InteractiveElement, Interactivity, IntoElement, KeyDownEvent,
+    MouseButton, ParentElement, Pixels, RenderOnce, SharedString, Stateful,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
 };
 
 #[derive(Default, Clone, Copy)]
@@ -522,6 +522,8 @@ impl RenderOnce for Button {
                 window.prevent_default();
             })
             .when_some(self.on_click, |this, on_click| {
+                let key_on_click = on_click.clone();
+                let key_clickable = clickable;
                 this.on_click(move |event, window, cx| {
                     // Stop handle any click event when disabled.
                     // To avoid handle dropdown menu open when button is disabled.
@@ -531,6 +533,16 @@ impl RenderOnce for Button {
                     }
 
                     (on_click)(event, window, cx);
+                })
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    if !key_clickable {
+                        return;
+                    }
+                    let key = event.keystroke.key.as_str();
+                    if key == "enter" || key == "return" || key == " " {
+                        cx.stop_propagation();
+                        (key_on_click)(&ClickEvent::default(), window, cx);
+                    }
                 })
             })
             .when_some(self.on_hover.filter(|_| hoverable), |this, on_hover| {

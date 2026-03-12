@@ -517,7 +517,25 @@ impl DocumentViewModel {
         cx.subscribe_in(&table_state, window, move |cv, ts, event, window, cx| {
             use gpui_component::table::TableEvent;
             match event {
-                TableEvent::SelectRow(_) => {}
+                TableEvent::SelectRow(row_ix) => {
+                    let row_ix = *row_ix;
+                    let session_key = cv.view_model.current_session();
+                    let doc_key = ts.read(cx).delegate().document_key(row_ix);
+                    if let (Some(sk), Some(dk)) = (session_key, doc_key) {
+                        cv.state.update(cx, |s, cx| {
+                            s.select_single_doc(&sk, dk, String::new());
+                            cx.notify();
+                        });
+                        ts.update(cx, |ts, _cx| {
+                            let mut keys = std::collections::HashSet::new();
+                            if let Some(dk) = ts.delegate().document_key(row_ix) {
+                                keys.insert(dk);
+                            }
+                            ts.delegate_mut().set_selected_doc_keys(keys);
+                        });
+                        cx.notify();
+                    }
+                }
                 TableEvent::DoubleClickedRow(row_ix) => {
                     let row_ix = *row_ix;
                     let session_key = cv.view_model.current_session();

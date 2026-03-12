@@ -24,16 +24,16 @@ use super::Sidebar;
 
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state_ref = self.state.read(cx);
-        let appearance = state_ref.settings.appearance.clone();
-        let active_connections = state_ref.active_connections_snapshot();
+        let appearance = self.state.read(cx).settings.appearance.clone();
+
+        let active_connections = self.cached_active.clone();
         let connecting_id = self.model.connecting_connection;
 
-        // Collect disconnected connections for the connect dropdown
-        let disconnected_connections: Vec<_> = state_ref
-            .connections_snapshot()
-            .into_iter()
+        let disconnected_connections: Vec<_> = self
+            .cached_connections
+            .iter()
             .filter(|c| !active_connections.contains_key(&c.id))
+            .cloned()
             .collect();
 
         let state = self.state.clone();
@@ -480,13 +480,7 @@ impl Render for Sidebar {
                                                     _window.focus(&row_focus);
                                                     cx.stop_propagation();
 
-                                                    state_clone.update(cx, |state, cx| {
-                                                        state.select_connection(
-                                                            Some(connection_id),
-                                                            cx,
-                                                        );
-                                                    });
-
+                                                    // Optimistic: update selection visually, detect double-click
                                                     let is_double_click =
                                                         sidebar_entity.update(cx, |sidebar, cx| {
                                                             sidebar.model.selected_tree_id =
@@ -497,13 +491,27 @@ impl Render for Sidebar {
                                                             is_double
                                                         });
 
+                                                    // Deferred: state changes run after the frame paints
+                                                    let state_d = state_clone.clone();
+                                                    let sidebar_d = sidebar_entity.clone();
+                                                    let node_id_d = node_id.clone();
+                                                    let db_name_d = db_name.clone();
+                                                    let selected_db_d = selected_db.clone();
+                                                    let selected_col_d = selected_col.clone();
+                                                    sidebar_entity.update(cx, |_, cx| {
+                                                        cx.defer(move |cx| {
+                                                    state_d.update(cx, |state, cx| {
+                                                        state.select_connection(
+                                                            Some(connection_id),
+                                                            cx,
+                                                        );
+                                                    });
+
                                                     if is_double_click {
-                                                        // Double-click on connection to connect (expand only)
                                                         if is_connection {
-                                                            // Read live state instead of stale closure capture
-                                                            let currently_expanded = sidebar_entity
+                                                            let currently_expanded = sidebar_d
                                                                 .update(cx, |sidebar, _cx| {
-                                                                    sidebar.model.expanded_nodes.contains(&node_id)
+                                                                    sidebar.model.expanded_nodes.contains(&node_id_d)
                                                                 });
                                                             let should_expand = if is_connecting
                                                             {
@@ -513,17 +521,17 @@ impl Render for Sidebar {
                                                             } else {
                                                                 true
                                                             };
-                                                            sidebar_entity.update(cx, |sidebar, cx| {
+                                                            sidebar_d.update(cx, |sidebar, cx| {
                                                                 if should_expand {
                                                                     sidebar
                                                                         .model
                                                                         .expanded_nodes
-                                                                        .insert(node_id.clone());
+                                                                        .insert(node_id_d.clone());
                                                                 } else {
                                                                     sidebar
                                                                         .model
                                                                         .expanded_nodes
-                                                                        .remove(&node_id);
+                                                                        .remove(&node_id_d);
                                                                 }
                                                                 sidebar.persist_expanded_nodes(cx);
                                                                 sidebar.refresh_tree(cx);
@@ -533,32 +541,29 @@ impl Render for Sidebar {
                                                                 return;
                                                             }
                                                             AppCommands::connect(
-                                                                state_clone.clone(),
-                                                                node_id.connection_id(),
+                                                                state_d.clone(),
+                                                                node_id_d.connection_id(),
                                                                 cx,
                                                             );
-                                                        }
-                                                        // Double-click on database to load collections (expand only)
-                                                        else if is_database
-                                                            && let Some(ref db) = db_name
+                                                        } else if is_database
+                                                            && let Some(ref db) = db_name_d
                                                         {
-                                                            // Read live state instead of stale closure capture
-                                                            let currently_expanded = sidebar_entity
+                                                            let currently_expanded = sidebar_d
                                                                 .update(cx, |sidebar, _cx| {
-                                                                    sidebar.model.expanded_nodes.contains(&node_id)
+                                                                    sidebar.model.expanded_nodes.contains(&node_id_d)
                                                                 });
                                                             let should_expand = !currently_expanded;
-                                                            sidebar_entity.update(cx, |sidebar, cx| {
+                                                            sidebar_d.update(cx, |sidebar, cx| {
                                                                 if should_expand {
                                                                     sidebar
                                                                         .model
                                                                         .expanded_nodes
-                                                                        .insert(node_id.clone());
+                                                                        .insert(node_id_d.clone());
                                                                 } else {
                                                                     sidebar
                                                                         .model
                                                                         .expanded_nodes
-                                                                        .remove(&node_id);
+                                                                        .remove(&node_id_d);
                                                                 }
                                                                 sidebar.persist_expanded_nodes(cx);
                                                                 sidebar.refresh_tree(cx);
@@ -567,37 +572,35 @@ impl Render for Sidebar {
                                                             if !should_expand || is_loading_db {
                                                                 return;
                                                             }
-                                                            let should_load = state_clone
+                                                            let should_load = state_d
                                                                 .read(cx)
                                                                 .active_connection_by_id(connection_id)
                                                                 .is_some_and(|conn| {
                                                                     !conn.collections.contains_key(db)
                                                                 });
                                                             if should_load {
-                                                                sidebar_entity.update(
+                                                                sidebar_d.update(
                                                                     cx,
                                                                     |sidebar, cx| {
                                                                         sidebar
                                                                             .model
                                                                             .loading_databases
-                                                                            .insert(node_id.clone());
+                                                                            .insert(node_id_d.clone());
                                                                         cx.notify();
                                                                     },
                                                                 );
                                                                 AppCommands::load_collections(
-                                                                    state_clone.clone(),
+                                                                    state_d.clone(),
                                                                     connection_id,
                                                                     db.clone(),
                                                                     cx,
                                                                 );
                                                             }
-                                                        }
-                                                        // Double-click on collection to open
-                                                        else if is_collection
+                                                        } else if is_collection
                                                             && let (Some(db), Some(col)) =
-                                                                (&selected_db, &selected_col)
+                                                                (&selected_db_d, &selected_col_d)
                                                         {
-                                                            state_clone.update(cx, |state, cx| {
+                                                            state_d.update(cx, |state, cx| {
                                                                 state.select_collection(
                                                                     db.clone(),
                                                                     col.clone(),
@@ -605,19 +608,17 @@ impl Render for Sidebar {
                                                                 );
                                                             });
                                                         }
-                                                    }
-                                                    // Single click: select database or preview collection
-                                                    else if is_database
-                                                        && let Some(db) = &db_name
+                                                    } else if is_database
+                                                        && let Some(db) = &db_name_d
                                                     {
-                                                        state_clone.update(cx, |state, cx| {
+                                                        state_d.update(cx, |state, cx| {
                                                             state.select_database(db.clone(), cx);
                                                         });
                                                     } else if is_collection
                                                         && let (Some(db), Some(col)) =
-                                                            (&selected_db, &selected_col)
+                                                            (&selected_db_d, &selected_col_d)
                                                     {
-                                                        state_clone.update(cx, |state, cx| {
+                                                        state_d.update(cx, |state, cx| {
                                                             state.preview_collection(
                                                                 db.clone(),
                                                                 col.clone(),
@@ -625,13 +626,18 @@ impl Render for Sidebar {
                                                             );
                                                         });
                                                     }
+                                                        });
+                                                    });
                                                 }
                                             })
+                                            .border_l_2()
+                                            .border_color(gpui::transparent_black())
                                             .when(!selected, |s| {
                                                 s.hover(|s| s.bg(theme_list_hover))
                                             })
                                             .when(selected, |s| {
                                                 s.bg(theme_list_active)
+                                                    .border_color(theme_primary)
                                                     .hover(|s| s.bg(theme_list_active))
                                             })
                                             .cursor_pointer()

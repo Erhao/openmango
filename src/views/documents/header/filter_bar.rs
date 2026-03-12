@@ -220,6 +220,7 @@ pub fn render_filter_row(
     col
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_query_segment(
     id: impl Into<ElementId>,
     icon: IconName,

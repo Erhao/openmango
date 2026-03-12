@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::*;
@@ -6,7 +7,7 @@ use gpui_component::input::InputState;
 use uuid::Uuid;
 
 use crate::components::{ConnectionDialog, ConnectionManager, open_confirm_dialog};
-use crate::models::TreeNodeId;
+use crate::models::{ActiveConnection, SavedConnection, TreeNodeId};
 use crate::state::{
     AppCommands, AppEvent, AppState, CopiedTreeItem, StatusMessage, TransferMode, TransferScope,
 };
@@ -30,13 +31,16 @@ pub(crate) struct Sidebar {
     state: Entity<AppState>,
     model: SidebarModel,
     search_state: Entity<InputState>,
-    focus_handle: FocusHandle,
+    pub(crate) focus_handle: FocusHandle,
     scroll_handle: UniformListScrollHandle,
     width: Pixels,
     collapsed: bool,
     sticky_connection_index: Option<usize>,
     typeahead_clear_task: Option<Task<()>>,
     last_tree_click: Option<(TreeNodeId, Instant)>,
+    // Rc-cached: only refreshed on structural changes, cheap to capture in render closures.
+    cached_connections: Rc<Vec<SavedConnection>>,
+    cached_active: Rc<HashMap<Uuid, ActiveConnection>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -46,11 +50,14 @@ impl Sidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (connections, active) = {
+        let (cached_connections, cached_active) = {
             let state_ref = state.read(cx);
-            (state_ref.connections_snapshot(), state_ref.active_connections_snapshot())
+            (
+                Rc::new(state_ref.connections_snapshot()),
+                Rc::new(state_ref.active_connections_snapshot()),
+            )
         };
-        let model = SidebarModel::new(connections, active);
+        let model = SidebarModel::new((*cached_connections).clone(), (*cached_active).clone());
         let search_state =
             cx.new(|cx| InputState::new(_window, cx).placeholder("Search databases"));
 
@@ -236,6 +243,8 @@ impl Sidebar {
             sticky_connection_index: None,
             typeahead_clear_task: None,
             last_tree_click: None,
+            cached_connections,
+            cached_active,
             _subscriptions: subscriptions,
         };
 
@@ -259,11 +268,11 @@ impl Sidebar {
     }
 
     fn refresh_tree(&mut self, cx: &mut Context<Self>) {
-        let (connections, active, selected_connection, selected_db, selected_col) = {
+        let (selected_connection, selected_db, selected_col) = {
             let state_ref = self.state.read(cx);
+            self.cached_connections = Rc::new(state_ref.connections_snapshot());
+            self.cached_active = Rc::new(state_ref.active_connections_snapshot());
             (
-                state_ref.connections_snapshot(),
-                state_ref.active_connections_snapshot(),
                 state_ref.selected_connection_id(),
                 state_ref.selected_database_name(),
                 state_ref.selected_collection_name(),
@@ -274,7 +283,8 @@ impl Sidebar {
             self.model.ensure_selection_from_state(selected_connection, selected_db, selected_col);
         }
 
-        if let Some(ix) = self.model.refresh_entries(&connections, &active) {
+        if let Some(ix) = self.model.refresh_entries(&self.cached_connections, &self.cached_active)
+        {
             self.scroll_handle.scroll_to_item(ix, gpui::ScrollStrategy::Center);
         }
         cx.notify();
@@ -344,9 +354,12 @@ impl Sidebar {
             return;
         }
 
-        self.model.ensure_selection_from_state(connection_id, selected_db, selected_col);
-        self.persist_expanded_nodes(cx);
-        self.refresh_tree(cx);
+        if let Some(ix) =
+            self.model.ensure_selection_from_state(connection_id, selected_db, selected_col)
+        {
+            self.scroll_handle.scroll_to_item(ix, gpui::ScrollStrategy::Center);
+        }
+        cx.notify();
     }
 
     fn persist_expanded_nodes(&mut self, cx: &mut Context<Self>) {
@@ -852,21 +865,24 @@ impl Sidebar {
             return;
         };
         self.scroll_handle.scroll_to_item(next, gpui::ScrollStrategy::Center);
-        let state = self.state.clone();
-        state.update(cx, |state, cx| match node_id {
-            TreeNodeId::Connection(connection_id) => {
-                state.select_connection(Some(connection_id), cx);
-            }
-            TreeNodeId::Database { connection, database } => {
-                state.select_connection(Some(connection), cx);
-                state.select_database(database, cx);
-            }
-            TreeNodeId::Collection { connection, database, collection } => {
-                state.select_connection(Some(connection), cx);
-                state.preview_collection(database, collection, cx);
-            }
-        });
         cx.notify();
+
+        let state = self.state.clone();
+        cx.defer(move |cx| {
+            state.update(cx, |state, cx| match node_id {
+                TreeNodeId::Connection(connection_id) => {
+                    state.select_connection(Some(connection_id), cx);
+                }
+                TreeNodeId::Database { connection, database } => {
+                    state.select_connection(Some(connection), cx);
+                    state.select_database(database, cx);
+                }
+                TreeNodeId::Collection { connection, database, collection } => {
+                    state.select_connection(Some(connection), cx);
+                    state.preview_collection(database, collection, cx);
+                }
+            });
+        });
     }
 
     fn move_search_selection(&mut self, delta: isize, cx: &mut Context<Self>) {

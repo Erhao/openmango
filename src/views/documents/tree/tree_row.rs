@@ -122,8 +122,11 @@ pub fn render_tree_row(
 
     let mut row =
         div().flex().items_center().w_full().gap(spacing::xs()).rounded(borders::radius_sm());
+    let theme_primary = cx.theme().primary;
     row = row
-        .when(_selected, |s: Div| s.bg(cx.theme().list_active))
+        .border_l_2()
+        .border_color(gpui::transparent_black())
+        .when(_selected, |s: Div| s.bg(cx.theme().list_active).border_color(theme_primary))
         .when(!_selected && is_multi_selected, |s: Div| s.bg(cx.theme().list_active))
         .when(!_selected && !is_multi_selected, |s: Div| s.hover(|s| s.bg(cx.theme().list_hover)));
     let row = row

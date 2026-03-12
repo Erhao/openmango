@@ -10,8 +10,8 @@ use crate::helpers::validate::{REDACTED_PASSWORD, extract_uri_password, inject_u
 use crate::keyboard::{
     CloseTab, CopyConnectionUri, CopySelectionName, CreateCollection, CreateDatabase, CreateIndex,
     DeleteConnection, DeleteDatabase, DisconnectConnection, DownloadUpdate, EditConnection,
-    InstallUpdate, NewConnection, NextTab, OpenActionBar, OpenForge, OpenSettings, PrevTab,
-    QuitApp, RefreshView, ToggleAiPanel,
+    FocusContent, FocusSidebar, InstallUpdate, NewConnection, NextTab, OpenActionBar, OpenForge,
+    OpenSettings, PrevTab, QuitApp, RefreshView, ToggleAiPanel,
 };
 use crate::state::app_state::updater::UpdateStatus;
 use crate::state::{AppCommands, AppState, CollectionSubview, View};
@@ -485,6 +485,12 @@ impl Render for AppRoot {
                     };
                     state.open_forge_tab(key.connection_id, key.database, None, cx);
                 });
+            }))
+            .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
+                window.focus(&this.sidebar.read(cx).focus_handle);
+            }))
+            .on_action(cx.listener(|this, _: &FocusContent, window, _cx| {
+                window.focus(&this.focus_handle);
             }))
             .on_action(cx.listener(|this, _: &DownloadUpdate, _window, cx| {
                 AppCommands::download_update(this.state.clone(), cx);

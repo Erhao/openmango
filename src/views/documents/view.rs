@@ -214,7 +214,7 @@ impl Render for CollectionView {
         let filter_valid = self.filter_error_message.is_none();
 
         let filter_dirty = if let Some(ref fs) = self.filter_state {
-            let input_text = normalized_filter_query(&fs.read(cx).value().to_string());
+            let input_text = normalized_filter_query(fs.read(cx).value().as_ref());
             let applied = normalized_filter_query(&filter_raw);
             input_text != applied
         } else {

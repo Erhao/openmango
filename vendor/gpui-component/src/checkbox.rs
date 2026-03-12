@@ -6,7 +6,7 @@ use crate::{
 };
 use gpui::{
     div, prelude::FluentBuilder as _, px, relative, rems, svg, Animation, AnimationExt, AnyElement,
-    App, Div, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    App, Div, ElementId, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, RenderOnce,
     StatefulInteractiveElement, StyleRefinement, Styled, Window,
 };
 
@@ -193,22 +193,12 @@ impl RenderOnce for Checkbox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
 
-        let focus_handle = window
-            .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
-            .read(cx)
-            .clone();
+        let focus_handle =
+            window.use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle()).read(cx).clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let border_color = if checked {
-            cx.theme().primary
-        } else {
-            cx.theme().input
-        };
-        let color = if self.disabled {
-            border_color.opacity(0.5)
-        } else {
-            border_color
-        };
+        let border_color = if checked { cx.theme().primary } else { cx.theme().input };
+        let color = if self.disabled { border_color.opacity(0.5) } else { border_color };
         let radius = cx.theme().radius.min(px(4.));
 
         div().child(
@@ -216,9 +206,7 @@ impl RenderOnce for Checkbox {
                 .id(self.id.clone())
                 .when(!self.disabled, |this| {
                     this.track_focus(
-                        &focus_handle
-                            .tab_stop(self.tab_stop)
-                            .tab_index(self.tab_index),
+                        &focus_handle.tab_stop(self.tab_stop).tab_index(self.tab_index),
                     )
                 })
                 .h_flex()
@@ -233,9 +221,7 @@ impl RenderOnce for Checkbox {
                     Size::Large => this.text_lg(),
                     _ => this,
                 })
-                .when(self.disabled, |this| {
-                    this.text_color(cx.theme().muted_foreground)
-                })
+                .when(self.disabled, |this| this.text_color(cx.theme().muted_foreground))
                 .rounded(cx.theme().radius * 0.5)
                 .focus_ring(is_focused, px(2.), window, cx)
                 .refine_style(&self.style)
@@ -302,6 +288,16 @@ impl RenderOnce for Checkbox {
                         move |_, window, cx| {
                             window.prevent_default();
                             Self::handle_click(&on_click, checked, window, cx);
+                        }
+                    })
+                    .on_key_down({
+                        let on_click = self.on_click.clone();
+                        move |event: &KeyDownEvent, window, cx| {
+                            let key = event.keystroke.key.as_str();
+                            if key == " " || key == "enter" || key == "return" {
+                                cx.stop_propagation();
+                                Self::handle_click(&on_click, checked, window, cx);
+                            }
                         }
                     })
                 }),

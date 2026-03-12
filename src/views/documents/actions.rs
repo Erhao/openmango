@@ -12,9 +12,10 @@ use crate::keyboard::{
     DeleteAggregationStage, DeleteCollection, DeleteDocument, DiscardDocumentChanges,
     DuplicateAggregationStage, DuplicateDocument, EditDocumentJson, EditValueType, FindInResults,
     FormatAggregationStage, InsertDocument, MoveAggregationStageDown, MoveAggregationStageUp,
-    PasteDocuments, RemoveMatchingValues, RemoveSelectedField, RenameField, RunAggregation,
-    SaveDocument, SelectNextAggregationStage, SelectPrevAggregationStage, ShowAggregationSubview,
-    ShowDocumentsSubview, ShowIndexesSubview, ShowStatsSubview, ToggleAggregationStageEnabled,
+    NextSearchMatch, PasteDocuments, PrevSearchMatch, RemoveMatchingValues, RemoveSelectedField,
+    RenameField, RunAggregation, SaveDocument, SelectNextAggregationStage,
+    SelectPrevAggregationStage, ShowAggregationSubview, ShowDocumentsSubview, ShowIndexesSubview,
+    ShowStatsSubview, ToggleAggregationStageEnabled,
 };
 use crate::state::{AppCommands, CollectionSubview, DocumentViewMode, StatusMessage};
 
@@ -53,6 +54,14 @@ impl CollectionView {
             this.close_search(window, cx);
             cx.notify();
             cx.stop_propagation();
+        }))
+        .on_action(cx.listener(|this, _: &NextSearchMatch, _window, cx| {
+            this.next_match(cx);
+            cx.notify();
+        }))
+        .on_action(cx.listener(|this, _: &PrevSearchMatch, _window, cx| {
+            this.prev_match(cx);
+            cx.notify();
         }))
         .on_action(cx.listener(|this, _: &InsertDocument, window, cx| {
             let Some(session_key) = this.view_model.current_session() else {

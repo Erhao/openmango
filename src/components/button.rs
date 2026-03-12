@@ -3,7 +3,7 @@ use gpui::*;
 use gpui_component::{ActiveTheme as _, tooltip::Tooltip};
 use std::rc::Rc;
 
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 type TooltipAction = (Rc<Box<dyn Action>>, Option<SharedString>);
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -88,7 +88,7 @@ impl Button {
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_click = Some(Box::new(handler));
+        self.on_click = Some(Rc::new(handler));
         self
     }
 
@@ -217,7 +217,16 @@ impl RenderOnce for Button {
         } else {
             el = el.cursor_pointer().hover(|s| s.bg(hover_bg));
             if let Some(handler) = self.on_click {
-                el = el.on_click(handler);
+                let key_handler = handler.clone();
+                el = el
+                    .on_click(move |event, window, cx| (handler)(event, window, cx))
+                    .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                        let key = event.keystroke.key.as_str();
+                        if key == "enter" || key == "return" || key == " " {
+                            cx.stop_propagation();
+                            (key_handler)(&ClickEvent::default(), window, cx);
+                        }
+                    });
             }
         }
 
