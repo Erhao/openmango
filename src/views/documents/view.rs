@@ -932,12 +932,13 @@ impl Render for CollectionView {
         let content_with_builder = if show_builder {
             if let Some(panel) = self.filter_builder_panel.clone() {
                 div()
+                    .relative()
                     .flex()
-                    .flex_row()
+                    .flex_col()
                     .flex_1()
                     .min_h(px(0.0))
-                    .child(div().flex().flex_col().flex_1().min_w(px(0.0)).child(content))
-                    .child(div().w(px(560.0)).flex_shrink_0().h_full().child(panel))
+                    .child(content)
+                    .child(div().absolute().top_0().right_0().bottom_0().w(px(480.0)).child(panel))
                     .into_any_element()
             } else {
                 content

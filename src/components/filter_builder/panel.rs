@@ -70,6 +70,11 @@ enum CalendarTarget {
     RangeEnd(u64),
 }
 
+#[derive(Default)]
+struct CalendarAnchorBounds {
+    bounds: Option<Bounds<Pixels>>,
+}
+
 struct ConditionInputs {
     field_state: Entity<InputState>,
     scalar_state: Entity<InputState>,
@@ -816,6 +821,83 @@ impl FilterBuilderPanel {
         self.sync_condition_inputs(condition_id, window, cx);
     }
 
+    fn render_calendar_trigger(
+        &self,
+        button_id: impl Into<ElementId>,
+        target: CalendarTarget,
+        tooltip: impl Into<SharedString>,
+        view: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_active = self.calendar_target == Some(target);
+        let cid = match target {
+            CalendarTarget::Single(id)
+            | CalendarTarget::RangeStart(id)
+            | CalendarTarget::RangeEnd(id) => id,
+        };
+        let suffix = match target {
+            CalendarTarget::Single(_) => 0u64,
+            CalendarTarget::RangeStart(_) => 1,
+            CalendarTarget::RangeEnd(_) => 2,
+        };
+
+        let btn = Button::new(button_id)
+            .ghost()
+            .compact()
+            .icon(Icon::new(IconName::Calendar).xsmall())
+            .tooltip(tooltip)
+            .on_click({
+                let view = view.clone();
+                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    view.update(cx, |this, cx| {
+                        this.toggle_calendar(target, window, cx);
+                    });
+                }
+            });
+
+        let anchor_id: ElementId = SharedString::from(format!("cal-float-{cid}-{suffix}")).into();
+        let anchor_state =
+            window.use_keyed_state(anchor_id, cx, |_, _| CalendarAnchorBounds::default());
+        let trigger_bounds = anchor_state.read(cx).bounds;
+
+        let mut wrapper = div().child(btn).child(
+            canvas(
+                {
+                    let state = anchor_state.clone();
+                    move |bounds, _, cx| {
+                        state.update(cx, |state, _| {
+                            state.bounds = Some(bounds);
+                        });
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        );
+
+        if is_active && let Some(calendar_state) = self.calendar_state.clone() {
+            wrapper = wrapper.child(
+                deferred(
+                    anchored()
+                        .snap_to_window_with_margin(px(8.0))
+                        .anchor(Corner::TopLeft)
+                        .when_some(trigger_bounds, |el, bounds| {
+                            el.position(Point::new(
+                                bounds.origin.x,
+                                bounds.origin.y + bounds.size.height,
+                            ))
+                        })
+                        .child(div().mt(px(4.0)).child(render_calendar_panel(&calendar_state, cx))),
+                )
+                .with_priority(1),
+            );
+        }
+
+        wrapper.into_any_element()
+    }
+
     fn handle_field_drop(
         &mut self,
         field: &DragField,
@@ -1551,7 +1633,7 @@ impl FilterBuilderPanel {
         condition: &FilterCondition,
         inputs: &ConditionInputs,
         view: &Entity<Self>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mut input_row = div().flex().items_center().gap(spacing::xs());
@@ -1574,30 +1656,17 @@ impl FilterBuilderPanel {
         }
 
         if condition.field_type == FieldType::DateTime {
-            input_row = input_row.child(
-                Button::new(("calendar-open-single", condition.id))
-                    .ghost()
-                    .compact()
-                    .icon(Icon::new(IconName::Calendar).xsmall())
-                    .on_click({
-                        let view = view.clone();
-                        let cid = condition.id;
-                        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                            view.update(cx, |this, cx| {
-                                this.toggle_calendar(CalendarTarget::Single(cid), window, cx);
-                            });
-                        }
-                    }),
-            );
+            input_row = input_row.child(self.render_calendar_trigger(
+                ("calendar-open-single", condition.id),
+                CalendarTarget::Single(condition.id),
+                "Pick date",
+                view,
+                window,
+                cx,
+            ));
         }
 
-        let mut col = div().flex().flex_col().gap(px(2.0)).child(input_row);
-        if self.calendar_target == Some(CalendarTarget::Single(condition.id))
-            && let Some(calendar_state) = &self.calendar_state
-        {
-            col = col.child(render_calendar_panel(calendar_state, cx));
-        }
-        col
+        input_row
     }
 
     fn render_list_value_editor(
@@ -1816,7 +1885,7 @@ impl FilterBuilderPanel {
         condition: &FilterCondition,
         inputs: &ConditionInputs,
         view: &Entity<Self>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let use_number = condition.field_type == FieldType::Number;
@@ -1860,53 +1929,25 @@ impl FilterBuilderPanel {
 
         if use_calendar {
             row = row
-                .child(
-                    Button::new(("range-calendar-start", cid))
-                        .ghost()
-                        .compact()
-                        .icon(Icon::new(IconName::Calendar).xsmall())
-                        .tooltip("Pick start date")
-                        .on_click({
-                            let view = view.clone();
-                            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                view.update(cx, |this, cx| {
-                                    this.toggle_calendar(
-                                        CalendarTarget::RangeStart(cid),
-                                        window,
-                                        cx,
-                                    );
-                                });
-                            }
-                        }),
-                )
-                .child(
-                    Button::new(("range-calendar-end", cid))
-                        .ghost()
-                        .compact()
-                        .icon(Icon::new(IconName::Calendar).xsmall())
-                        .tooltip("Pick end date")
-                        .on_click({
-                            let view = view.clone();
-                            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                view.update(cx, |this, cx| {
-                                    this.toggle_calendar(CalendarTarget::RangeEnd(cid), window, cx);
-                                });
-                            }
-                        }),
-                );
+                .child(self.render_calendar_trigger(
+                    ("range-calendar-start", cid),
+                    CalendarTarget::RangeStart(cid),
+                    "Pick start date",
+                    view,
+                    window,
+                    cx,
+                ))
+                .child(self.render_calendar_trigger(
+                    ("range-calendar-end", cid),
+                    CalendarTarget::RangeEnd(cid),
+                    "Pick end date",
+                    view,
+                    window,
+                    cx,
+                ));
         }
 
-        let mut col = div().flex().flex_col().gap(px(2.0)).child(row);
-        if use_calendar
-            && matches!(
-                self.calendar_target,
-                Some(CalendarTarget::RangeStart(id) | CalendarTarget::RangeEnd(id)) if id == cid
-            )
-            && let Some(calendar_state) = &self.calendar_state
-        {
-            col = col.child(render_calendar_panel(calendar_state, cx));
-        }
-        col
+        row
     }
 
     fn render_operator_dropdown(
@@ -1920,7 +1961,7 @@ impl FilterBuilderPanel {
         let field_type = condition.field_type;
         let operators = field_type.available_operators().to_vec();
         styled_dropdown_button(("op-select", condition.id), label, cx).dropdown_menu_with_anchor(
-            Corner::BottomLeft,
+            Corner::TopLeft,
             {
                 let view = view.clone();
                 let cid = condition.id;
@@ -2367,6 +2408,7 @@ impl Render for FilterBuilderPanel {
             .bg(cx.theme().sidebar)
             .border_l_1()
             .border_color(cx.theme().sidebar_border)
+            .shadow_lg()
             .on_key_down({
                 let view = view.clone();
                 move |event: &KeyDownEvent, window, cx| match &event.keystroke.key {
