@@ -29,6 +29,7 @@ impl CollectionView {
         is_loading: bool,
         session_key: Option<SessionKey>,
         selected_docs: std::collections::HashSet<DocumentKey>,
+        drag_enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -466,6 +467,7 @@ impl CollectionView {
                                         &tree_order,
                                         &search_opts,
                                         current_match_id.as_deref(),
+                                        drag_enabled,
                                         documents_focus.clone(),
                                         cx,
                                     )

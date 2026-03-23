@@ -867,6 +867,7 @@ impl Render for CollectionView {
                 is_loading,
                 session_key.clone(),
                 selected_docs,
+                filter_builder_open,
                 window,
                 cx,
             ),

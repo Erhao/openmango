@@ -989,72 +989,6 @@ impl FilterBuilderPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let active_count = self.tree.active_condition_count();
-        let validation_error = self.tree.validation_error();
-
-        let header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(spacing::sm())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(spacing::xs())
-                    .child(summary_chip(
-                        self.tree.combinator.label(),
-                        if self.tree.combinator == Combinator::And {
-                            cx.theme().primary
-                        } else {
-                            cx.theme().warning
-                        },
-                        cx,
-                    ))
-                    .when(active_count > 0, |this| {
-                        this.child(summary_chip(
-                            format!(
-                                "{active_count} rule{}",
-                                if active_count == 1 { "" } else { "s" }
-                            ),
-                            cx.theme().muted_foreground,
-                            cx,
-                        ))
-                    })
-                    .when(self.is_dirty(), |this| this.child(neutral_chip("Draft", cx)))
-                    .when(validation_error.is_some(), |this| {
-                        this.child(summary_chip("Needs attention", cx.theme().danger, cx))
-                    }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(spacing::xs())
-                    .child(self.render_combinator_toggle(None, self.tree.combinator, view, cx))
-                    .child(
-                        Button::new("root-add-rule")
-                            .ghost()
-                            .compact()
-                            .icon(Icon::new(IconName::Plus).xsmall())
-                            .label("Rule")
-                            .on_click({
-                                let view = view.clone();
-                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                    view.update(cx, |this, cx| this.add_condition(window, cx));
-                                }
-                            }),
-                    )
-                    .child(
-                        Button::new("root-add-group").ghost().compact().label("Group").on_click({
-                            let view = view.clone();
-                            move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
-                                view.update(cx, |this, cx| this.add_group(cx));
-                            }
-                        }),
-                    ),
-            );
-
         let content = if let Some(reason) = &self.unsupported_reason {
             self.render_unsupported_state(reason, view, window, cx).into_any_element()
         } else {
@@ -1062,19 +996,7 @@ impl FilterBuilderPanel {
                 .into_any_element()
         };
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(spacing::xs())
-            .rounded(borders::radius_md())
-            .border_1()
-            .border_color(cx.theme().sidebar_border.opacity(0.7))
-            .bg(cx.theme().tab_bar.opacity(0.58))
-            .shadow_sm()
-            .px(spacing::sm())
-            .py(spacing::xs())
-            .child(header)
-            .child(content)
+        div().flex().flex_col().gap(spacing::sm()).child(content)
     }
 
     fn render_unsupported_state(
@@ -2224,7 +2146,7 @@ impl FilterBuilderPanel {
             .items_center()
             .gap(px(2.0))
             .rounded(borders::radius_sm())
-            .bg(cx.theme().sidebar.opacity(0.65))
+            .bg(opaque_theme_color(cx.theme().sidebar))
             .p(px(2.0))
             .child(toggle_chip("$and", current == Combinator::And, cx).on_click({
                 let view = view.clone();
@@ -2259,6 +2181,258 @@ impl FilterBuilderPanel {
                 }
             }))
     }
+
+    fn render_shell_header(&self, view: &Entity<Self>, cx: &mut Context<Self>) -> AnyElement {
+        let mut title_row = div().flex().items_center().gap(spacing::xs()).child(
+            div()
+                .text_base()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(cx.theme().foreground)
+                .child("Filter Builder"),
+        );
+
+        if self.unsupported_reason.is_some() {
+            title_row = title_row.child(summary_chip("JSON only", cx.theme().warning, cx));
+        } else if self.tree.validation_error().is_some() {
+            title_row = title_row.child(summary_chip("Needs attention", cx.theme().danger, cx));
+        } else if self.is_dirty() {
+            title_row = title_row.child(neutral_chip("Draft", cx));
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .px(spacing::md())
+            .pt(spacing::md())
+            .pb(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(spacing::sm())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .truncate()
+                                    .child("Build the collection filter without raw JSON."),
+                            )
+                            .child(title_row),
+                    )
+                    .child(
+                        Button::new("close-filter-builder")
+                            .ghost()
+                            .compact()
+                            .icon(Icon::new(IconName::Close).xsmall())
+                            .tooltip("Close filter builder")
+                            .on_click({
+                                let view = view.clone();
+                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                    view.update(cx, |this, cx| this.attempt_close(window, cx));
+                                }
+                            }),
+                    ),
+            )
+            .child(shell_section_divider(cx))
+            .into_any_element()
+    }
+
+    fn render_shell_toolbar(&self, view: &Entity<Self>, cx: &mut Context<Self>) -> AnyElement {
+        let summary = if self.unsupported_reason.is_some() {
+            "Visual edits are paused for this filter.".to_string()
+        } else if self.tree.active_condition_count() == 0 {
+            "No rules yet. Add one or drop a field to begin.".to_string()
+        } else {
+            format!("{} active", rule_count_label(self.tree.active_condition_count()))
+        };
+
+        let mut left = div().flex().items_center().gap(spacing::sm()).flex_1().min_w(px(0.0));
+
+        if self.unsupported_reason.is_none() {
+            left = left.child(self.render_combinator_toggle(None, self.tree.combinator, view, cx));
+        }
+
+        left = left.child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .truncate()
+                .child(summary),
+        );
+
+        let mut right = div().flex().items_center().gap(spacing::xs());
+        if self.unsupported_reason.is_none() {
+            right = right
+                .child(
+                    Button::new("root-add-rule")
+                        .ghost()
+                        .compact()
+                        .icon(Icon::new(IconName::Plus).xsmall())
+                        .label("Rule")
+                        .on_click({
+                            let view = view.clone();
+                            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                view.update(cx, |this, cx| this.add_condition(window, cx));
+                            }
+                        }),
+                )
+                .child(Button::new("root-add-group").ghost().compact().label("Group").on_click({
+                    let view = view.clone();
+                    move |_: &ClickEvent, _window: &mut Window, cx: &mut App| {
+                        view.update(cx, |this, cx| this.add_group(cx));
+                    }
+                }));
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .px(spacing::md())
+            .pt(px(2.0))
+            .pb(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(spacing::sm())
+                    .child(left)
+                    .child(right),
+            )
+            .child(shell_section_divider(cx))
+            .into_any_element()
+    }
+
+    fn render_shell_footer(
+        &self,
+        dirty: bool,
+        can_run: bool,
+        validation_error: Option<&str>,
+        view: &Entity<Self>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (status_text, status_color) = if self.unsupported_reason.is_some() {
+            (
+                "This query stays in JSON until you clear it or open the editor.".to_string(),
+                cx.theme().warning,
+            )
+        } else if let Some(error) = validation_error {
+            (error.to_string(), cx.theme().danger)
+        } else {
+            ("Cmd/Ctrl+Enter to run".to_string(), cx.theme().muted_foreground)
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .px(spacing::md())
+            .pt(px(6.0))
+            .pb(spacing::sm())
+            .child(shell_section_divider(cx))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(spacing::sm())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_xs()
+                            .text_color(status_color)
+                            .truncate()
+                            .child(status_text),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(spacing::sm())
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(spacing::xs())
+                                    .child(
+                                        Button::new("builder-open-json")
+                                            .ghost()
+                                            .compact()
+                                            .icon(Icon::new(IconName::Braces).xsmall())
+                                            .label("Open JSON")
+                                            .on_click({
+                                                let view = view.clone();
+                                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                                    view.update(cx, |this, cx| {
+                                                        this.open_json_editor(window, cx)
+                                                    });
+                                                }
+                                            }),
+                                    )
+                                    .child(
+                                        Button::new("builder-clear")
+                                            .ghost()
+                                            .compact()
+                                            .label("Clear")
+                                            .on_click({
+                                                let view = view.clone();
+                                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                                    view.update(cx, |this, cx| this.clear_draft(window, cx));
+                                                }
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(spacing::xs())
+                                    .child(
+                                        Button::new("builder-reset")
+                                            .compact()
+                                            .label("Reset")
+                                            .disabled(!dirty)
+                                            .on_click({
+                                                let view = view.clone();
+                                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                                    view.update(cx, |this, cx| {
+                                                        this.reset_to_applied(window, cx)
+                                                    });
+                                                }
+                                            }),
+                                    )
+                                    .child(
+                                        Button::new("builder-run")
+                                            .primary()
+                                            .compact()
+                                            .label("Run")
+                                            .icon(Icon::new(IconName::Search).xsmall())
+                                            .disabled(!can_run)
+                                            .on_click({
+                                                let view = view.clone();
+                                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                                    view.update(cx, |this, cx| this.apply_filter(window, cx));
+                                                }
+                                            }),
+                                    ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
 }
 
 impl Render for FilterBuilderPanel {
@@ -2272,42 +2446,8 @@ impl Render for FilterBuilderPanel {
         let dirty = self.is_dirty();
         let can_run = self.can_run();
 
-        let header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(spacing::sm())
-            .px(spacing::sm())
-            .py(spacing::xs())
-            .border_b_1()
-            .border_color(cx.theme().sidebar_border.opacity(0.65))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(spacing::xs())
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(cx.theme().foreground)
-                            .child("Filter Builder"),
-                    )
-                    .when(dirty, |this| this.child(neutral_chip("Draft", cx))),
-            )
-            .child(
-                Button::new("close-filter-builder")
-                    .ghost()
-                    .compact()
-                    .icon(Icon::new(IconName::Close).xsmall())
-                    .tooltip("Close filter builder")
-                    .on_click({
-                        let view = view.clone();
-                        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                            view.update(cx, |this, cx| this.attempt_close(window, cx));
-                        }
-                    }),
-            );
+        let header = self.render_shell_header(&view, cx);
+        let toolbar = self.render_shell_toolbar(&view, cx);
 
         let body = div()
             .flex()
@@ -2315,89 +2455,13 @@ impl Render for FilterBuilderPanel {
             .flex_1()
             .min_h(px(0.0))
             .overflow_y_scrollbar()
-            .px(spacing::sm())
-            .py(spacing::sm())
-            .gap(spacing::sm())
+            .px(spacing::md())
+            .pt(spacing::sm())
+            .pb(spacing::md())
             .child(self.render_root_group(&view, window, cx));
 
-        let footer = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(spacing::sm())
-            .px(spacing::md())
-            .py(spacing::sm())
-            .border_t_1()
-            .border_color(cx.theme().sidebar_border.opacity(0.65))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(spacing::xs())
-                    .child(
-                        Button::new("builder-run")
-                            .primary()
-                            .compact()
-                            .label("Run")
-                            .icon(Icon::new(IconName::Search).xsmall())
-                            .disabled(!can_run)
-                            .on_click({
-                                let view = view.clone();
-                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                    view.update(cx, |this, cx| this.apply_filter(window, cx));
-                                }
-                            }),
-                    )
-                    .child(Button::new("builder-clear").ghost().compact().label("Clear").on_click(
-                        {
-                            let view = view.clone();
-                            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                view.update(cx, |this, cx| this.clear_draft(window, cx));
-                            }
-                        },
-                    ))
-                    .child(
-                        Button::new("builder-reset")
-                            .ghost()
-                            .compact()
-                            .label("Reset")
-                            .disabled(!dirty)
-                            .on_click({
-                                let view = view.clone();
-                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                    view.update(cx, |this, cx| this.reset_to_applied(window, cx));
-                                }
-                            }),
-                    )
-                    .child(
-                        Button::new("builder-open-json")
-                            .ghost()
-                            .compact()
-                            .icon(Icon::new(IconName::Braces).xsmall())
-                            .label("Open JSON")
-                            .on_click({
-                                let view = view.clone();
-                                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                                    view.update(cx, |this, cx| this.open_json_editor(window, cx));
-                                }
-                            }),
-                    ),
-            )
-            .child(
-                div().flex().items_center().gap(spacing::sm()).child(
-                    div()
-                        .text_xs()
-                        .text_color(
-                            validation_error
-                                .as_ref()
-                                .map(|_| cx.theme().danger)
-                                .unwrap_or(cx.theme().muted_foreground),
-                        )
-                        .child(
-                            validation_error.unwrap_or_else(|| "Cmd/Ctrl+Enter to run".to_string()),
-                        ),
-                ),
-            );
+        let footer =
+            self.render_shell_footer(dirty, can_run, validation_error.as_deref(), &view, cx);
 
         div()
             .id("filter-builder-root")
@@ -2405,10 +2469,11 @@ impl Render for FilterBuilderPanel {
             .flex_col()
             .w_full()
             .h_full()
-            .bg(cx.theme().sidebar)
+            .overflow_hidden()
+            .bg(opaque_theme_color(cx.theme().sidebar))
             .border_l_1()
-            .border_color(cx.theme().sidebar_border)
-            .shadow_lg()
+            .border_color(cx.theme().sidebar_border.opacity(0.82))
+            .shadow_md()
             .on_key_down({
                 let view = view.clone();
                 move |event: &KeyDownEvent, window, cx| match &event.keystroke.key {
@@ -2422,6 +2487,7 @@ impl Render for FilterBuilderPanel {
                 }
             })
             .child(header)
+            .child(toolbar)
             .child(body)
             .child(footer)
     }
@@ -2745,6 +2811,19 @@ fn neutral_chip(label: impl Into<SharedString>, cx: &App) -> Div {
         .font_weight(FontWeight::MEDIUM)
         .text_color(cx.theme().foreground)
         .child(label.into())
+}
+
+fn rule_count_label(count: usize) -> String {
+    format!("{count} rule{}", if count == 1 { "" } else { "s" })
+}
+
+fn opaque_theme_color(mut color: Hsla) -> Hsla {
+    color.a = 1.0;
+    color
+}
+
+fn shell_section_divider(cx: &App) -> Div {
+    div().w_full().h(px(1.0)).bg(cx.theme().sidebar_border.opacity(0.45))
 }
 
 fn list_count_label(count: usize, field_type: FieldType) -> String {

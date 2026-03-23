@@ -52,6 +52,7 @@ pub fn render_tree_row(
     tree_order: &[String],
     search_opts: &SearchOptions,
     current_match_id: Option<&str>,
+    drag_enabled: bool,
     documents_focus: FocusHandle,
     cx: &App,
 ) -> ListItem {
@@ -123,7 +124,7 @@ pub fn render_tree_row(
         div().w(px(18.0)).into_any_element()
     };
 
-    let is_draggable_field = !is_root && meta.is_some();
+    let is_draggable_field = drag_enabled && !is_root && meta.is_some();
     let drag_meta = meta.cloned();
     let key_drag = if is_draggable_field {
         drag_meta.as_ref().map(|meta| {
