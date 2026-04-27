@@ -3,6 +3,7 @@ pub mod connection_io;
 pub mod crypto;
 pub mod format;
 pub mod keystore;
+pub mod secrets_vault;
 pub mod validate;
 
 pub use format::{format_bytes, format_number};
