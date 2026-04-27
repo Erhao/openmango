@@ -129,6 +129,19 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
     # Sign the main app bundle
     codesign --force --options runtime --timestamp --deep --sign "$SIGNING_IDENTITY" "$APP_DIR"
     codesign --verify --deep --strict "$APP_DIR"
+else
+    # No signing identity — apply an ad-hoc signature so Gatekeeper reports
+    # "unidentified developer" (which the user can bypass by right-click →
+    # Open) instead of the misleading "is damaged" message that otherwise
+    # forces users to run xattr -cr from a terminal.
+    echo "No signing identity provided; applying ad-hoc signature."
+    for tool in mongodump mongorestore mongosh-sidecar; do
+        if [[ -f "$APP_DIR/Contents/Resources/bin/$tool" ]]; then
+            codesign --force --sign - "$APP_DIR/Contents/Resources/bin/$tool"
+        fi
+    done
+    codesign --force --deep --sign - "$APP_DIR"
+    codesign --verify --deep --strict "$APP_DIR"
 fi
 
 ZIP_PATH="$DIST_DIR/${APP_NAME}-${VERSION}-${ARCH_SUFFIX}.zip"
