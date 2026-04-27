@@ -376,6 +376,30 @@ impl AppRoot {
                     CollectionSubview::Schema => {
                         AppCommands::analyze_collection_schema(self.state.clone(), session_key, cx);
                     }
+                    CollectionSubview::Distinct => {
+                        let (field, filter) = {
+                            let state_ref = self.state.read(cx);
+                            state_ref
+                                .session(&session_key)
+                                .map(|session| {
+                                    (
+                                        session.data.distinct.field_raw.clone(),
+                                        session.data.distinct.filter_raw.clone(),
+                                    )
+                                })
+                                .unwrap_or_default()
+                        };
+                        if !field.trim().is_empty() {
+                            AppCommands::run_distinct_query(
+                                self.state.clone(),
+                                session_key,
+                                field,
+                                filter,
+                                cx,
+                            );
+                        }
+                    }
+                    CollectionSubview::Shell => {}
                 }
             }
             View::Database => {

@@ -49,6 +49,7 @@ mod collection_meta;
 mod collections;
 mod connections;
 mod databases;
+mod distinct;
 mod documents;
 mod explain;
 mod indexes;

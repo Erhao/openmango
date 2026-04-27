@@ -155,6 +155,7 @@ impl Render for CollectionView {
             schema_selected_field,
             schema_expanded_fields,
             schema_filter,
+            distinct,
         ) = if let Some(snapshot) = snapshot {
             (
                 snapshot.items,
@@ -186,6 +187,7 @@ impl Render for CollectionView {
                 snapshot.schema_selected_field,
                 snapshot.schema_expanded_fields,
                 snapshot.schema_filter,
+                snapshot.distinct,
             )
         } else {
             (
@@ -218,6 +220,7 @@ impl Render for CollectionView {
                 None::<String>,
                 std::collections::HashSet::new(),
                 String::new(),
+                crate::state::DistinctState::default(),
             )
         };
         let filter_active = !matches!(filter_raw.trim(), "" | "{}");
@@ -664,6 +667,100 @@ impl Render for CollectionView {
             self.schema_filter_subscription = Some(subscription);
         }
 
+        if self.distinct_field_state.is_none() {
+            let field_state = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder("Field (e.g. status)")
+                    .submit_on_enter(true)
+                    .clean_on_escape()
+            });
+            let subscription =
+                cx.subscribe_in(&field_state, window, move |view, state, event, _window, cx| {
+                    match event {
+                        InputEvent::Change => {
+                            let Some(session_key) = view.view_model.current_session() else {
+                                return;
+                            };
+                            let raw = state.read(cx).value().to_string();
+                            view.state.update(cx, |s, _| {
+                                if let Some(session) = s.session_mut(&session_key) {
+                                    session.data.distinct.field_raw = raw;
+                                }
+                            });
+                        }
+                        InputEvent::PressEnter { .. } => {
+                            let Some(session_key) = view.view_model.current_session() else {
+                                return;
+                            };
+                            let field = state.read(cx).value().to_string();
+                            let filter = view
+                                .distinct_filter_state
+                                .as_ref()
+                                .map(|f| f.read(cx).value().to_string())
+                                .unwrap_or_default();
+                            AppCommands::run_distinct_query(
+                                view.state.clone(),
+                                session_key,
+                                field,
+                                filter,
+                                cx,
+                            );
+                        }
+                        _ => {}
+                    }
+                });
+            self.distinct_field_state = Some(field_state);
+            self.distinct_field_subscription = Some(subscription);
+        }
+
+        if self.distinct_filter_state.is_none() {
+            let filter_state = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .code_editor("javascript")
+                    .multi_line(false)
+                    .placeholder("Filter (optional, JSON)")
+                    .submit_on_enter(true)
+                    .clean_on_escape()
+            });
+            let subscription =
+                cx.subscribe_in(&filter_state, window, move |view, state, event, _window, cx| {
+                    match event {
+                        InputEvent::Change => {
+                            let Some(session_key) = view.view_model.current_session() else {
+                                return;
+                            };
+                            let raw = state.read(cx).value().to_string();
+                            view.state.update(cx, |s, _| {
+                                if let Some(session) = s.session_mut(&session_key) {
+                                    session.data.distinct.filter_raw = raw;
+                                }
+                            });
+                        }
+                        InputEvent::PressEnter { .. } => {
+                            let Some(session_key) = view.view_model.current_session() else {
+                                return;
+                            };
+                            let field = view
+                                .distinct_field_state
+                                .as_ref()
+                                .map(|f| f.read(cx).value().to_string())
+                                .unwrap_or_default();
+                            let filter = state.read(cx).value().to_string();
+                            AppCommands::run_distinct_query(
+                                view.state.clone(),
+                                session_key,
+                                field,
+                                filter,
+                                cx,
+                            );
+                        }
+                        _ => {}
+                    }
+                });
+            self.distinct_filter_state = Some(filter_state);
+            self.distinct_filter_subscription = Some(subscription);
+        }
+
         if self.input_session != session_key {
             self.input_session = session_key.clone();
             self.syncing_query_inputs = true;
@@ -717,6 +814,22 @@ impl Render for CollectionView {
             }
         }
 
+        if self.distinct_input_session != session_key {
+            self.distinct_input_session = session_key.clone();
+            if let Some(input) = self.distinct_field_state.clone() {
+                let val = distinct.field_raw.clone();
+                input.update(cx, |state, cx| {
+                    state.set_value(val, window, cx);
+                });
+            }
+            if let Some(input) = self.distinct_filter_state.clone() {
+                let val = distinct.filter_raw.clone();
+                input.update(cx, |state, cx| {
+                    state.set_value(val, window, cx);
+                });
+            }
+        }
+
         if self.schema_filter_session != session_key {
             self.schema_filter_session = session_key.clone();
             if let Some(schema_filter_state) = self.schema_filter_state.clone() {
@@ -748,6 +861,8 @@ impl Render for CollectionView {
             CollectionSubview::Stats => key_context.push_str(" Stats"),
             CollectionSubview::Aggregation => key_context.push_str(" Aggregation"),
             CollectionSubview::Schema => key_context.push_str(" Schema"),
+            CollectionSubview::Distinct => key_context.push_str(" Distinct"),
+            CollectionSubview::Shell => key_context.push_str(" Shell"),
             CollectionSubview::Documents => {}
         }
 
@@ -895,6 +1010,10 @@ impl Render for CollectionView {
                 session_key.clone(),
                 cx,
             ),
+            CollectionSubview::Distinct => {
+                self.render_distinct_view(distinct, session_key.clone(), cx)
+            }
+            CollectionSubview::Shell => self.render_shell_view(session_key.clone(), cx),
         };
 
         let explain_layer =
@@ -988,6 +1107,30 @@ impl CollectionView {
                 cx,
             ))
             .into_any_element()
+    }
+
+    fn render_distinct_view(
+        &mut self,
+        distinct: crate::state::DistinctState,
+        session_key: Option<SessionKey>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use super::views::distinct_view::render_distinct_panel;
+        let field_state = self.distinct_field_state.clone();
+        let filter_state = self.distinct_filter_state.clone();
+        render_distinct_panel(
+            distinct,
+            field_state,
+            filter_state,
+            session_key,
+            self.state.clone(),
+            cx,
+        )
+    }
+
+    fn render_shell_view(&self, session_key: Option<SessionKey>, cx: &App) -> AnyElement {
+        use super::views::shell_view::render_shell_panel;
+        render_shell_panel(session_key, self.state.clone(), cx)
     }
 
     fn render_stats_view(

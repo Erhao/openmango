@@ -73,6 +73,11 @@ pub struct CollectionView {
     pub(crate) aggregation_limit_subscription: Option<Subscription>,
     pub(crate) filter_builder_panel: Option<Entity<FilterBuilderPanel>>,
     pub(crate) filter_builder_session: Option<SessionKey>,
+    pub(crate) distinct_field_state: Option<Entity<InputState>>,
+    pub(crate) distinct_filter_state: Option<Entity<InputState>>,
+    pub(crate) distinct_input_session: Option<SessionKey>,
+    pub(crate) distinct_field_subscription: Option<Subscription>,
+    pub(crate) distinct_filter_subscription: Option<Subscription>,
     pub(crate) _subscriptions: Vec<Subscription>,
 }
 
@@ -509,6 +514,11 @@ impl CollectionView {
             aggregation_limit_subscription: None,
             filter_builder_panel: None,
             filter_builder_session: None,
+            distinct_field_state: None,
+            distinct_filter_state: None,
+            distinct_input_session: None,
+            distinct_field_subscription: None,
+            distinct_filter_subscription: None,
             _subscriptions: subscriptions,
         }
     }
