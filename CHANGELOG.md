@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-04-27
+
+### Changed
+- **Saved credentials now live in an encrypted file instead of the macOS
+  Keychain.** On first launch, OpenMango prompts you to set a master password.
+  All connection URIs, SSH credentials, proxy passwords, and AI provider API
+  keys are stored in `~/Library/Application Support/openmango/secrets.enc`,
+  encrypted with AES-256-GCM and a key derived from your master password via
+  Argon2id. On subsequent launches you enter the password to unlock. Forgot
+  it? Click "Reset vault" — all saved secrets are wiped and you set a new
+  password.
+
+  Migration note: previously-saved Keychain entries are not migrated. After
+  upgrading, you'll need to re-enter passwords for existing connections once.
+  This change removes the recurring Keychain permission prompt that appeared
+  on every release upgrade due to ad-hoc signing.
+
 ## [0.2.3] - 2026-04-27
 
 ### Fixed
