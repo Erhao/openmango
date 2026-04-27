@@ -6,7 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-04-27
+
+### Fixed
+- Distributed `.app` bundles now carry an ad-hoc codesignature so macOS reports
+  "unidentified developer" instead of the misleading "is damaged" error.
+  First-time users can right-click → Open to launch without running `xattr -cr`
+  from a terminal.
+
+## [0.2.2] - 2026-04-27
+
 ### Added
+- Distinct sub-tab on the collection view — query distinct values for a field with an optional JSON filter and inspect the value list inline
+- Embedded Mongo Shell sub-tab — open the existing Forge query shell scoped to the current collection from the collection's tab strip
 - Table view for documents — browse collections in a spreadsheet-style grid with sortable, resizable, and pinnable columns
 - Per-page selector in the pagination bar — choose between 10, 25, 50, or 100 documents per page
 - Islands tab style — choose between Islands, Segmented, or Underline tab appearance in Settings
