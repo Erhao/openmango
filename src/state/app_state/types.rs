@@ -45,6 +45,8 @@ pub enum CollectionSubview {
     Stats,
     Aggregation,
     Schema,
+    Distinct,
+    Shell,
 }
 
 impl CollectionSubview {
@@ -54,6 +56,8 @@ impl CollectionSubview {
             2 => Self::Stats,
             3 => Self::Aggregation,
             4 => Self::Schema,
+            5 => Self::Distinct,
+            6 => Self::Shell,
             _ => Self::Documents,
         }
     }
@@ -65,6 +69,8 @@ impl CollectionSubview {
             Self::Stats => 2,
             Self::Aggregation => 3,
             Self::Schema => 4,
+            Self::Distinct => 5,
+            Self::Shell => 6,
         }
     }
 }
@@ -900,8 +906,7 @@ impl Default for ExplainState {
 
 fn build_explain_diff(from: &ExplainRun, to: &ExplainRun) -> ExplainDiff {
     let mut stage_deltas = build_stage_deltas(&from.nodes, &to.nodes);
-    stage_deltas
-        .sort_by(|left, right| right.impact_score_delta.abs().cmp(&left.impact_score_delta.abs()));
+    stage_deltas.sort_by_key(|delta| std::cmp::Reverse(delta.impact_score_delta.abs()));
     stage_deltas.truncate(16);
 
     ExplainDiff {
@@ -1057,6 +1062,23 @@ pub struct SessionDocument {
     pub doc: Document,
 }
 
+/// State for the Distinct sub-tab.
+#[derive(Debug, Clone, Default)]
+pub struct DistinctState {
+    /// Field path to query distinct values for (e.g. "status").
+    pub field_raw: String,
+    /// Optional filter document (Extended JSON).
+    pub filter_raw: String,
+    /// Distinct values returned by the server, formatted as text.
+    pub values: Option<Vec<String>>,
+    /// Total number of distinct values returned (== values.len()).
+    pub total: u64,
+    pub loading: bool,
+    pub error: Option<String>,
+    /// Monotonic request id used to discard stale results.
+    pub request_id: u64,
+}
+
 /// Session data loaded from MongoDB and pagination state.
 pub struct SessionData {
     pub items: Vec<SessionDocument>,
@@ -1085,6 +1107,7 @@ pub struct SessionData {
     pub schema: Option<SchemaAnalysis>,
     pub schema_loading: bool,
     pub schema_error: Option<String>,
+    pub distinct: DistinctState,
 }
 
 impl Default for SessionData {
@@ -1116,6 +1139,7 @@ impl Default for SessionData {
             schema: None,
             schema_loading: false,
             schema_error: None,
+            distinct: DistinctState::default(),
         }
     }
 }
@@ -1189,6 +1213,7 @@ pub struct SessionSnapshot {
     pub schema_selected_field: Option<String>,
     pub schema_expanded_fields: HashSet<String>,
     pub schema_filter: String,
+    pub distinct: DistinctState,
 }
 
 #[derive(Debug, Clone)]

@@ -322,6 +322,8 @@ impl Render for AppRoot {
                     Some(CollectionSubview::Stats) => key_context.push_str(" Stats"),
                     Some(CollectionSubview::Aggregation) => key_context.push_str(" Aggregation"),
                     Some(CollectionSubview::Schema) => key_context.push_str(" Schema"),
+                    Some(CollectionSubview::Distinct) => key_context.push_str(" Distinct"),
+                    Some(CollectionSubview::Shell) => key_context.push_str(" Shell"),
                     _ => {}
                 }
             }

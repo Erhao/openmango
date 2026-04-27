@@ -14,8 +14,8 @@ pub use crate::ai::{AiProvider, AiSettings};
 pub use app_state::{
     ActiveTab, AppState, BsonOutputFormat, CardinalityBand, CollectionOverview, CollectionStats,
     CollectionSubview, CompressionMode, CopiedTreeItem, DatabaseKey, DatabaseSessionData,
-    DatabaseSessionState, DatabaseStats, DocumentViewMode, Encoding, ExplainBottleneck,
-    ExplainCostBand, ExplainDiff, ExplainNode, ExplainOpenMode, ExplainPanelTab,
+    DatabaseSessionState, DatabaseStats, DistinctState, DocumentViewMode, Encoding,
+    ExplainBottleneck, ExplainCostBand, ExplainDiff, ExplainNode, ExplainOpenMode, ExplainPanelTab,
     ExplainRejectedPlan, ExplainRun, ExplainScope, ExplainSeverity, ExplainStageDelta,
     ExplainState, ExplainSummary, ExplainViewMode, ExtendedJsonMode, InsertMode, SchemaAnalysis,
     SchemaCardinality, SchemaField, SchemaFieldType, SessionData, SessionDocument, SessionKey,

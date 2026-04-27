@@ -142,6 +142,7 @@ impl AppState {
             schema_selected_field: session.view.schema_selected_field.clone(),
             schema_expanded_fields: session.view.schema_expanded_fields.clone(),
             schema_filter: session.view.schema_filter.clone(),
+            distinct: session.data.distinct.clone(),
         })
     }
 

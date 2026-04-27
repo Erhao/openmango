@@ -226,12 +226,13 @@ impl AppCommands {
                             let chunk = chunk?;
                             file.write_all(&chunk)?;
                             downloaded += chunk.len() as u64;
-                            let pct = if total > 0 {
-                                ((downloaded * 100) / total).min(100) as u8
-                            } else {
-                                // No Content-Length: estimate indeterminate progress
-                                // Cap at 99 until we know it's truly done
-                                99u8.min((downloaded / (1024 * 100)) as u8)
+                            let pct = match (downloaded * 100).checked_div(total) {
+                                Some(value) => value.min(100) as u8,
+                                None => {
+                                    // No Content-Length: estimate indeterminate progress
+                                    // Cap at 99 until we know it's truly done
+                                    99u8.min((downloaded / (1024 * 100)) as u8)
+                                }
                             };
                             if pct != last_pct {
                                 last_pct = pct;

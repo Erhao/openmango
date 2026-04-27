@@ -56,5 +56,7 @@ pub fn render_subview_tabs(
             Tab::new().label("Stats"),
             Tab::new().label("Aggregation"),
             Tab::new().label("Schema"),
+            Tab::new().label("Distinct"),
+            Tab::new().label("Shell"),
         ])
 }
